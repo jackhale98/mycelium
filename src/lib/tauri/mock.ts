@@ -502,6 +502,11 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 	rename_node: () => undefined,
 	import_image: () => 'images/demo-image.png',
 	rebuild_database: () => ({ total_files: 5, indexed: 5, skipped: 0, removed: 0 }),
+	get_documents_path: () => '/home/user/Documents',
+	list_subdirectories: () => [
+		{ name: 'org-roam', path: '/home/user/Documents/org-roam', is_dir: true, has_org_files: true },
+		{ name: 'notes', path: '/home/user/Documents/notes', is_dir: true, has_org_files: false },
+	],
 	check_vault_changes: () => false,
 	get_agenda: () => MOCK_NODES
 		.filter(n => n.todo || n.scheduled || n.deadline)

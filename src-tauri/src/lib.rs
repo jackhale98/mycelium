@@ -44,6 +44,9 @@ pub fn run() {
             // Tags
             commands::tags::get_all_tags,
             commands::tags::get_nodes_by_tag,
+            // Picker
+            commands::picker::get_documents_path,
+            commands::picker::list_subdirectories,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

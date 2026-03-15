@@ -139,3 +139,19 @@ export async function getUnlinkedMentions(nodeId: string): Promise<SearchResult[
 export async function quickCapture(text: string): Promise<string> {
 	return invoke('quick_capture', { text });
 }
+
+// Folder picker
+export async function getDocumentsPath(): Promise<string> {
+	return invoke('get_documents_path');
+}
+
+export interface DirEntry {
+	name: string;
+	path: string;
+	is_dir: boolean;
+	has_org_files: boolean;
+}
+
+export async function listSubdirectories(path: string): Promise<DirEntry[]> {
+	return invoke('list_subdirectories', { path });
+}
