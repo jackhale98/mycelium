@@ -15,20 +15,35 @@ Mycelium lets you view, edit, search, and navigate your org-roam notes on deskto
 
 ## Features
 
-- **Rendered view** with clickable links, collapsible headings, tables, code blocks, inline images, bold/italic/code formatting
-- **Source editor** powered by CodeMirror 6 with org-mode syntax highlighting, folding, and live preview
-- **Backlinks & forward links** in a slide-out drawer with source context
-- **Full-text search** across titles and file content with highlighted snippets
-- **Graph view** with d3-force visualization, tag-based coloring, orphan node detection, and random node discovery
-- **Daily notes** with quick-access calendar
-- **Tag browser** with filterable dropdown and inline filtering on the files tab
-- **Node creation** with auto-generated `:ID:` properties
-- **Node refactoring** — rename a node and update all backlink descriptions across the vault
-- **Image import** — pick an image, copy it to the vault, and insert an org link
+### Reading & Navigation
+- **Rendered view** — clickable links, collapsible headings, tables, code blocks, inline images, bold/italic/code/verbatim formatting. Property drawers and metadata hidden automatically.
+- **Backlinks & forward links** — slide-out drawer showing which nodes link here (with source context) and where this node links to
+- **Unlinked mentions** — discovers files that mention a node's title without an explicit link (like Obsidian)
+- **Graph view** — d3-force visualization with tag-based coloring, orphan node detection, and random node navigation
+
+### Editing
+- **Source editor** — CodeMirror 6 with org-mode syntax highlighting, folding, and Cmd+Click link navigation
+- **Full formatting toolbar** — headings (H1-H4), bold, italic, underline, strikethrough, code, verbatim, links, lists, checkboxes, tables (size picker), code blocks, quote blocks, timestamps, image import
+- **Create node at point** — type a name in Cmd+K, select "Create and insert link" to make a new node and insert `[[id:uuid][title]]` in one step
+- **Node refactoring** — rename a node and automatically update all backlink descriptions across the vault
+- **Image import** — pick an image file, copy it to the vault's `images/` directory, insert `[[file:images/name.png]]`
+- **Org-roam filename convention** — new files named `YYYYMMDDHHmmss-slug.org`
+
+### Organization
+- **Agenda view** — all TODO/SCHEDULED/DEADLINE items from SQLite (instant, no file parsing). Filter by active/deadlines/scheduled. Overdue items highlighted.
+- **Quick capture** — floating button to jot a thought in 2 seconds. Appends timestamped entry to today's daily note.
+- **Daily notes** — quick-access calendar with recent days
+- **Tag browser** — filterable dropdown that filters the file list inline
+- **Full-text search** — FTS5 across titles and body content with highlighted snippets
+
+### System
+- **`#+ROAM_EXCLUDE: t`** — respected during indexing, excluded files don't appear in search/graph/agenda
 - **Export** to Markdown and HTML
 - **Theme system** — light, dark, and system-auto modes
 - **File watcher** (desktop) and re-scan on focus (mobile)
+- **Database rebuild** — settings option to drop and re-index from scratch
 - **Round-trip fidelity** — the org parser preserves all whitespace and formatting
+- **Database stored in app data** — not in the vault directory, so it won't pollute your git repo
 
 ## Architecture
 
