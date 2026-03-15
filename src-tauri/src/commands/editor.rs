@@ -101,6 +101,57 @@ pub async fn create_file(
     Ok(file_path_str)
 }
 
+/// Import an image file into the vault's images/ directory.
+/// Copies the source file and returns the relative org link path.
+#[tauri::command]
+pub async fn import_image(
+    source_path: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let vault_path = state.vault_path()?;
+    let images_dir = vault_path.join("images");
+
+    // Create images/ directory if it doesn't exist
+    std::fs::create_dir_all(&images_dir)
+        .map_err(|e| format!("Failed to create images directory: {e}"))?;
+
+    let source = PathBuf::from(&source_path);
+    if !source.exists() {
+        return Err(format!("Source file not found: {source_path}"));
+    }
+
+    // Get filename, deduplicate if needed
+    let original_name = source
+        .file_name()
+        .ok_or("Invalid filename")?
+        .to_string_lossy()
+        .to_string();
+
+    let mut dest_name = original_name.clone();
+    let mut dest = images_dir.join(&dest_name);
+    let mut counter = 1;
+    while dest.exists() {
+        let stem = source
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let ext = source
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default();
+        dest_name = format!("{stem}-{counter}{ext}");
+        dest = images_dir.join(&dest_name);
+        counter += 1;
+    }
+
+    // Copy the file
+    std::fs::copy(&source, &dest)
+        .map_err(|e| format!("Failed to copy image: {e}"))?;
+
+    // Return the relative path for the org link
+    Ok(format!("images/{dest_name}"))
+}
+
 fn sanitize_filename(title: &str) -> String {
     title
         .chars()

@@ -6,7 +6,7 @@
 	import {
 		getNode, getBacklinks, getForwardLinks,
 		readFile, saveFile, listNodes,
-		exportMarkdown, exportHtml, renameNode,
+		exportMarkdown, exportHtml, renameNode, importImage,
 	} from '$lib/tauri/commands';
 	import RenderedView from '$lib/components/editor/RenderedView.svelte';
 	import OrgEditor from '$lib/components/editor/OrgEditor.svelte';
@@ -156,6 +156,33 @@
 		const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 		editorComponent?.insertAtCursor(`<${ds} ${days[d.getDay()]}>`);
 	}
+
+	async function onImage() {
+		try {
+			// Use Tauri dialog to pick an image file
+			const { open } = await import('@tauri-apps/plugin-dialog');
+			const selected = await open({
+				multiple: false,
+				filters: [{ name: 'Images', extensions: ['png','jpg','jpeg','gif','svg','webp','bmp'] }],
+			});
+			if (!selected) return;
+			const sourcePath = selected as string;
+			const relativePath = await importImage(sourcePath);
+			editorComponent?.insertAtCursor(`[[file:${relativePath}]]`);
+		} catch {
+			// Fallback for browser mode: use file input
+			const input = document.createElement('input');
+			input.type = 'file';
+			input.accept = 'image/*';
+			input.onchange = () => {
+				const file = input.files?.[0];
+				if (file) {
+					editorComponent?.insertAtCursor(`[[file:images/${file.name}]]`);
+				}
+			};
+			input.click();
+		}
+	}
 </script>
 
 <div class="flex h-full flex-col">
@@ -258,7 +285,7 @@
 
 	<!-- Toolbar only in edit mode -->
 	{#if showSource}
-		<EditorToolbar {onBold} {onItalic} {onCode} {onVerbatim} {onUnderline} {onStrike} {onLink} {onCheckbox} {onHeading} {onList} {onSrcBlock} {onQuote} {onTable} {onTimestamp} />
+		<EditorToolbar {onBold} {onItalic} {onCode} {onVerbatim} {onUnderline} {onStrike} {onLink} {onCheckbox} {onHeading} {onList} {onSrcBlock} {onQuote} {onTable} {onTimestamp} {onImage} />
 	{/if}
 
 	<MobileNav />

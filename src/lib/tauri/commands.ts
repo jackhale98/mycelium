@@ -111,3 +111,8 @@ export async function exportHtml(filePath: string): Promise<string> {
 export async function renameNode(nodeId: string, newTitle: string): Promise<void> {
 	return invoke('rename_node', { nodeId, newTitle });
 }
+
+// Image import
+export async function importImage(sourcePath: string): Promise<string> {
+	return invoke('import_image', { sourcePath });
+}

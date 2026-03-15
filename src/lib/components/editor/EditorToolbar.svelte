@@ -3,7 +3,7 @@
 
 	let {
 		onBold, onItalic, onCode, onVerbatim, onUnderline, onStrike,
-		onLink, onCheckbox, onHeading, onList, onSrcBlock, onQuote, onTable, onTimestamp,
+		onLink, onCheckbox, onHeading, onList, onSrcBlock, onQuote, onTable, onTimestamp, onImage,
 	}: {
 		onBold?: () => void;
 		onItalic?: () => void;
@@ -19,6 +19,7 @@
 		onQuote?: () => void;
 		onTable?: (rows: number, cols: number) => void;
 		onTimestamp?: () => void;
+		onImage?: () => void;
 	} = $props();
 
 	let showHeadingPicker = $state(false);
@@ -90,6 +91,9 @@
 		<button onclick={() => onSrcBlock?.()} title="Code block" class="flex h-9 min-w-[40px] shrink-0 items-center justify-center rounded-md font-mono text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">SRC</button>
 		<button onclick={() => onQuote?.()} title="Quote block" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&rdquo;</button>
 		<button onclick={() => onTimestamp?.()} title="Timestamp" class="flex h-9 min-w-[40px] shrink-0 items-center justify-center rounded-md text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">Date</button>
+		<button onclick={() => onImage?.()} title="Insert image" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">
+			<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M6.75 7.5a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75z" /></svg>
+		</button>
 
 		<div class="flex-1 shrink-0"></div>
 

@@ -29,6 +29,7 @@ pub fn run() {
             commands::editor::read_file,
             commands::editor::save_file,
             commands::editor::create_file,
+            commands::editor::import_image,
             // Graph
             commands::graph::get_graph_data,
             // Daily notes
