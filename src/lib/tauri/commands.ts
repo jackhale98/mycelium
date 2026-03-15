@@ -36,6 +36,10 @@ export async function syncVault(): Promise<SyncResult> {
 	return invoke('sync_vault');
 }
 
+export async function rebuildDatabase(): Promise<SyncResult> {
+	return invoke('rebuild_database');
+}
+
 // Node commands
 export async function getNode(id: string): Promise<NodeRecord | null> {
 	return invoke('get_node', { id });

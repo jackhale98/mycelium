@@ -56,3 +56,30 @@ pub async fn sync_vault(state: State<'_, AppState>) -> Result<sync::SyncResult, 
 
     state.with_db(|conn| sync::sync_vault(conn, &path_str).map_err(|e| e.to_string()))
 }
+
+/// Rebuild the database from scratch: drop all data and re-index every file.
+#[tauri::command]
+pub async fn rebuild_database(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<sync::SyncResult, String> {
+    use tauri::Emitter;
+
+    let vault_path = state.vault_path()?;
+    let path_str = vault_path.to_string_lossy().to_string();
+
+    let result = state.with_db(|conn| {
+        // Drop all existing data
+        conn.execute_batch(
+            "DELETE FROM files;
+             DELETE FROM nodes_fts;
+             DELETE FROM files_fts;"
+        ).map_err(|e| format!("Failed to clear database: {e}"))?;
+
+        // Re-index everything
+        sync::sync_vault(conn, &path_str).map_err(|e| e.to_string())
+    })?;
+
+    let _ = app.emit("db-updated", ());
+    Ok(result)
+}

@@ -2,10 +2,11 @@
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { vault } from '$lib/stores/vault.svelte';
 	import { theme, type ThemeMode } from '$lib/stores/theme.svelte';
-	import { syncVault, listFiles, listNodes } from '$lib/tauri/commands';
+	import { syncVault, rebuildDatabase, listFiles, listNodes } from '$lib/tauri/commands';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 
 	let isSyncing = $state(false);
+	let isRebuilding = $state(false);
 	let syncMessage = $state<string | null>(null);
 
 	async function handleResync() {
@@ -21,6 +22,23 @@
 			syncMessage = `Error: ${e}`;
 		} finally {
 			isSyncing = false;
+		}
+	}
+
+	async function handleRebuild() {
+		if (!confirm('This will drop all indexed data and rebuild the database from scratch. Continue?')) return;
+		isRebuilding = true;
+		syncMessage = null;
+		try {
+			const result = await rebuildDatabase();
+			const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
+			vault.updateFiles(files);
+			vault.updateNodes(nodes);
+			syncMessage = `Rebuilt: ${result.indexed} files indexed from scratch`;
+		} catch (e) {
+			syncMessage = `Error: ${e}`;
+		} finally {
+			isRebuilding = false;
 		}
 	}
 
@@ -81,20 +99,32 @@
 					{/if}
 				</div>
 
-				<div class="mt-4 flex gap-2">
+				<div class="mt-4 space-y-2">
+					<div class="flex gap-2">
+						<button
+							onclick={handleResync}
+							disabled={isSyncing || isRebuilding}
+							class="flex-1 rounded-lg border border-surface-200 px-3 py-2 text-sm font-medium hover:bg-surface-100 disabled:opacity-50 dark:border-surface-700 dark:hover:bg-surface-800"
+						>
+							{isSyncing ? 'Syncing...' : 'Re-sync Vault'}
+						</button>
+						<button
+							onclick={handleCloseVault}
+							class="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+						>
+							Close Vault
+						</button>
+					</div>
 					<button
-						onclick={handleResync}
-						disabled={isSyncing}
-						class="flex-1 rounded-lg border border-surface-200 px-3 py-2 text-sm font-medium hover:bg-surface-100 disabled:opacity-50 dark:border-surface-700 dark:hover:bg-surface-800"
+						onclick={handleRebuild}
+						disabled={isSyncing || isRebuilding}
+						class="w-full rounded-lg border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950"
 					>
-						{isSyncing ? 'Syncing...' : 'Re-sync Vault'}
+						{isRebuilding ? 'Rebuilding...' : 'Rebuild Database'}
 					</button>
-					<button
-						onclick={handleCloseVault}
-						class="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-					>
-						Close Vault
-					</button>
+					<p class="text-[11px] text-surface-700 dark:text-surface-300">
+						Re-sync checks for changes. Rebuild drops all indexed data and re-indexes every file from scratch.
+					</p>
 				</div>
 
 				{#if syncMessage}

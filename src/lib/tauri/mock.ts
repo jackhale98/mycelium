@@ -465,4 +465,5 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 	export_html: () => '<html><body><h1>Exported Note</h1><p>HTML export preview.</p></body></html>',
 	rename_node: () => undefined,
 	import_image: () => 'images/demo-image.png',
+	rebuild_database: () => ({ total_files: 5, indexed: 5, skipped: 0, removed: 0 }),
 };
