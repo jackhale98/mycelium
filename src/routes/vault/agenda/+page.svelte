@@ -257,59 +257,73 @@
 </div>
 
 {#snippet taskRow(item: NodeRecord)}
-	<div class="py-2 {changingId === item.id ? 'opacity-50' : ''}">
-		<!-- Row 1: state, title, priority -->
-		<div class="flex items-center gap-2">
+	{@const rowId = item.id}
+	<div
+		style="position:relative;overflow:hidden;border-radius:8px"
+		ontouchstart={(e) => {
+			const el = (e.currentTarget as HTMLElement);
+			const inner = el.querySelector('[data-inner]') as HTMLElement;
+			if (!inner) return;
+			const startX = e.touches[0].clientX;
+			let dx = 0;
+			const onMove = (ev: TouchEvent) => { dx = startX - ev.touches[0].clientX; inner.style.transform = `translateX(${Math.max(-160, Math.min(0, -dx))}px)`; };
+			const onEnd = () => {
+				document.removeEventListener('touchmove', onMove);
+				document.removeEventListener('touchend', onEnd);
+				inner.style.transition = 'transform 0.2s ease';
+				inner.style.transform = dx > 60 ? 'translateX(-160px)' : 'translateX(0)';
+				setTimeout(() => { inner.style.transition = ''; }, 200);
+			};
+			document.addEventListener('touchmove', onMove, { passive: true });
+			document.addEventListener('touchend', onEnd);
+		}}
+	>
+		<!-- Action buttons revealed by swipe -->
+		<div style="position:absolute;right:0;top:0;bottom:0;display:flex">
+			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#dc2626;color:white;font-size:11px;font-weight:600;cursor:pointer">
+				DL
+				<input type="date" value={extractDate(item.deadline)} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
+				<span style="font-size:9px;opacity:0.8">{extractDate(item.deadline) || 'none'}</span>
+			</label>
+			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#2563eb;color:white;font-size:11px;font-weight:600;cursor:pointer">
+				SC
+				<input type="date" value={extractDate(item.scheduled)} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
+				<span style="font-size:9px;opacity:0.8">{extractDate(item.scheduled) || 'none'}</span>
+			</label>
+		</div>
+
+		<!-- Main row content (swipes left to reveal actions) -->
+		<div data-inner style="position:relative;display:flex;align-items:center;gap:8px;padding:8px 4px;background:var(--color-surface-0, #fff);will-change:transform; {changingId === item.id ? 'opacity:0.5' : ''}">
 			<select
 				value={item.todo ?? ''}
 				onchange={(e) => setState(item, (e.target as HTMLSelectElement).value || null)}
 				disabled={changingId === item.id}
-				class="h-7 shrink-0 rounded border-0 py-0 pl-1 pr-5 text-[10px] font-bold"
-				style="color:{isDone(item) ? '#16a34a' : item.todo ? '#dc2626' : '#6b7280'};background:{isDone(item) ? '#f0fdf4' : item.todo ? '#fef2f2' : 'transparent'}"
+				style="height:28px;flex-shrink:0;border-radius:4px;border:0;padding:0 16px 0 4px;font-size:10px;font-weight:700;color:{isDone(item) ? '#16a34a' : item.todo ? '#dc2626' : '#6b7280'};background:{isDone(item) ? '#f0fdf4' : item.todo ? '#fef2f2' : 'transparent'}"
 			>
 				<option value="">None</option>
 				{#each orgConfig.todoKeywords as kw}<option value={kw}>{kw}</option>{/each}
 				{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
 			</select>
 
-			<button onclick={() => navigation.navigateToNode(item.id)} class="min-w-0 flex-1 text-left">
-				<div class="truncate text-sm {isDone(item) ? 'line-through opacity-60' : 'font-medium'}">{item.title ?? 'Untitled'}</div>
+			<button onclick={() => navigation.navigateToNode(item.id)} style="min-width:0;flex:1;text-align:left">
+				<div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{isDone(item) ? 'text-decoration:line-through;opacity:0.6' : 'font-weight:500'}">{item.title ?? 'Untitled'}</div>
+				{#if item.deadline || item.scheduled}
+					<div style="display:flex;gap:8px;font-size:10px;margin-top:2px">
+						{#if item.deadline}<span style="color:{isOverdue(item) ? '#dc2626' : '#6b7280'}">DL: {extractDate(item.deadline)}</span>{/if}
+						{#if item.scheduled}<span style="color:#2563eb">SC: {extractDate(item.scheduled)}</span>{/if}
+					</div>
+				{/if}
 			</button>
 
 			<select
 				value={item.priority ?? ''}
 				onchange={(e) => setPriority(item, (e.target as HTMLSelectElement).value || null)}
 				disabled={changingId === item.id}
-				class="h-7 shrink-0 rounded border-0 py-0 pl-1 pr-4 text-[10px] font-bold"
-				style="color:#ea580c;{item.priority ? 'background:#fff7ed' : 'background:transparent'}"
+				style="height:28px;flex-shrink:0;border-radius:4px;border:0;padding:0 12px 0 4px;font-size:10px;font-weight:700;color:#ea580c;{item.priority ? 'background:#fff7ed' : 'background:transparent'}"
 			>
 				<option value="">—</option>
 				{#each orgConfig.priorities as p}<option value={p}>#{p}</option>{/each}
 			</select>
-		</div>
-
-		<!-- Row 2: compact date editors -->
-		<div class="mt-1 flex items-center gap-3 pl-1 text-[11px]">
-			<label class="flex items-center gap-1 cursor-pointer">
-				<span class="font-semibold" style="color:#dc2626">DL</span>
-				<input
-					type="date"
-					value={extractDate(item.deadline)}
-					onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)}
-					class="rounded border px-1.5 py-0.5 text-[11px]"
-					style="border-color:#e2e8f0;color:{isOverdue(item) ? '#dc2626' : '#374151'};background:transparent;max-width:130px"
-				/>
-			</label>
-			<label class="flex items-center gap-1 cursor-pointer">
-				<span class="font-semibold" style="color:#2563eb">SC</span>
-				<input
-					type="date"
-					value={extractDate(item.scheduled)}
-					onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)}
-					class="rounded border px-1.5 py-0.5 text-[11px]"
-					style="border-color:#e2e8f0;color:#374151;background:transparent;max-width:130px"
-				/>
-			</label>
 		</div>
 	</div>
 {/snippet}
