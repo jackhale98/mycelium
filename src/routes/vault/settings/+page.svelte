@@ -3,9 +3,26 @@
 	import { vault } from '$lib/stores/vault.svelte';
 	import { theme, type ThemeMode } from '$lib/stores/theme.svelte';
 	import { syncVault, rebuildDatabase, listFiles, listNodes } from '$lib/tauri/commands';
+	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 
 	let isSyncing = $state(false);
+
+	// Editable copies of org config
+	let todoInput = $state(orgConfig.todoKeywords.join(', '));
+	let doneInput = $state(orgConfig.doneKeywords.join(', '));
+	let prioInput = $state(orgConfig.priorities.join(', '));
+
+	function saveOrgConfig() {
+		orgConfig.update({
+			todoKeywords: todoInput.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
+			doneKeywords: doneInput.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
+			priorities: prioInput.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
+		});
+		todoInput = orgConfig.todoKeywords.join(', ');
+		doneInput = orgConfig.doneKeywords.join(', ');
+		prioInput = orgConfig.priorities.join(', ');
+	}
 	let isRebuilding = $state(false);
 	let syncMessage = $state<string | null>(null);
 
@@ -149,6 +166,30 @@
 							<span class="text-xs font-medium">{opt.label}</span>
 						</button>
 					{/each}
+				</div>
+			</section>
+
+			<!-- Org Mode Configuration -->
+			<section class="rounded-xl border border-surface-200 p-4 dark:border-surface-700">
+				<h2 class="mb-3 text-sm font-semibold uppercase text-surface-700 dark:text-surface-300">
+					Org Mode
+				</h2>
+				<div class="space-y-3">
+					<div>
+						<label class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">TODO Keywords</label>
+						<input type="text" bind:value={todoInput} onblur={saveOrgConfig} class="w-full rounded-lg border border-surface-200 bg-surface-50 px-3 py-2 text-sm dark:border-surface-700 dark:bg-surface-950" placeholder="TODO, NEXT, WAITING" />
+						<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Active states, comma separated</p>
+					</div>
+					<div>
+						<label class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Done Keywords</label>
+						<input type="text" bind:value={doneInput} onblur={saveOrgConfig} class="w-full rounded-lg border border-surface-200 bg-surface-50 px-3 py-2 text-sm dark:border-surface-700 dark:bg-surface-950" placeholder="DONE, CANCELLED" />
+						<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Completion states, comma separated</p>
+					</div>
+					<div>
+						<label class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Priorities</label>
+						<input type="text" bind:value={prioInput} onblur={saveOrgConfig} class="w-full rounded-lg border border-surface-200 bg-surface-50 px-3 py-2 text-sm dark:border-surface-700 dark:bg-surface-950" placeholder="A, B, C" />
+						<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Priority levels (highest first), comma separated</p>
+					</div>
 				</div>
 			</section>
 

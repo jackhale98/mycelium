@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { editor } from '$lib/stores/editor.svelte';
+	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 
 	let {
 		onBold, onItalic, onCode, onVerbatim, onUnderline, onStrike,
 		onLink, onCheckbox, onHeading, onList, onSrcBlock, onQuote, onTable, onTimestamp, onImage,
+		onTodo, onPriority, onDeadline, onScheduled,
 	}: {
 		onBold?: () => void;
 		onItalic?: () => void;
@@ -20,10 +22,16 @@
 		onTable?: (rows: number, cols: number) => void;
 		onTimestamp?: () => void;
 		onImage?: () => void;
+		onTodo?: (keyword: string | null) => void;
+		onPriority?: (priority: string | null) => void;
+		onDeadline?: () => void;
+		onScheduled?: () => void;
 	} = $props();
 
 	let showHeadingPicker = $state(false);
 	let showTablePicker = $state(false);
+	let showTodoPicker = $state(false);
+	let showPrioPicker = $state(false);
 	let hoverRow = $state(0);
 	let hoverCol = $state(0);
 </script>
@@ -33,6 +41,11 @@
 		class="flex h-12 shrink-0 items-center gap-0.5 overflow-x-auto border-t border-surface-200 bg-surface-50 px-2 dark:border-surface-700 dark:bg-surface-900"
 		style="-webkit-overflow-scrolling: touch;"
 	>
+		<!-- Link (primary action) -->
+		<button onclick={() => onLink?.()} title="Insert link (Cmd+K)" class="flex h-9 min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-semibold hover:bg-surface-200 dark:hover:bg-surface-700" style="color:#16a34a">Link</button>
+
+		<div class="mx-0.5 h-6 w-px shrink-0 bg-surface-200 dark:bg-surface-700"></div>
+
 		<!-- Heading level picker -->
 		<div class="relative shrink-0">
 			<button
@@ -53,6 +66,43 @@
 			{/if}
 		</div>
 
+		<!-- TODO keyword picker -->
+		<div class="relative shrink-0">
+			<button onclick={() => (showTodoPicker = !showTodoPicker)} title="Set TODO state" class="flex h-9 min-w-[44px] items-center justify-center rounded-md text-[10px] font-bold text-red-600 hover:bg-surface-200 dark:text-red-400 dark:hover:bg-surface-700">TODO</button>
+			{#if showTodoPicker}
+				<button class="fixed inset-0 z-20" onclick={() => (showTodoPicker = false)} aria-label="Close"></button>
+				<div class="absolute bottom-full left-0 z-30 mb-1 min-w-[120px] rounded-lg border border-surface-200 bg-surface-0 py-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
+					<button onclick={() => { onTodo?.(null); showTodoPicker = false; }} class="flex w-full px-3 py-1.5 text-xs hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#6b7280">None</button>
+					{#each orgConfig.todoKeywords as kw}
+						<button onclick={() => { onTodo?.(kw); showTodoPicker = false; }} class="flex w-full px-3 py-1.5 text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#dc2626">{kw}</button>
+					{/each}
+					{#each orgConfig.doneKeywords as kw}
+						<button onclick={() => { onTodo?.(kw); showTodoPicker = false; }} class="flex w-full px-3 py-1.5 text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#16a34a">{kw}</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
+
+		<!-- Priority picker -->
+		<div class="relative shrink-0">
+			<button onclick={() => (showPrioPicker = !showPrioPicker)} title="Set priority" class="flex h-9 min-w-[36px] items-center justify-center rounded-md text-[10px] font-bold text-amber-600 hover:bg-surface-200 dark:text-amber-400 dark:hover:bg-surface-700">[#]</button>
+			{#if showPrioPicker}
+				<button class="fixed inset-0 z-20" onclick={() => (showPrioPicker = false)} aria-label="Close"></button>
+				<div class="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-lg border border-surface-200 bg-surface-0 p-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
+					<button onclick={() => { onPriority?.(null); showPrioPicker = false; }} class="flex h-8 w-8 items-center justify-center rounded text-[10px] hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#6b7280">--</button>
+					{#each orgConfig.priorities as p}
+						<button onclick={() => { onPriority?.(p); showPrioPicker = false; }} class="flex h-8 w-8 items-center justify-center rounded text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#ea580c">#{p}</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
+
+		<!-- DEADLINE and SCHEDULED -->
+		<button onclick={() => onDeadline?.()} title="Set DEADLINE" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-[10px] font-semibold text-red-600 hover:bg-surface-200 dark:text-red-400 dark:hover:bg-surface-700">DL</button>
+		<button onclick={() => onScheduled?.()} title="Set SCHEDULED" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-[10px] font-semibold text-blue-600 hover:bg-surface-200 dark:text-blue-400 dark:hover:bg-surface-700">SC</button>
+
+		<div class="mx-0.5 h-6 w-px shrink-0 bg-surface-200 dark:bg-surface-700"></div>
+
 		<!-- Inline formatting -->
 		<button onclick={() => onBold?.()} title="Bold *text*" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">B</button>
 		<button onclick={() => onItalic?.()} title="Italic /text/" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs italic text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">I</button>
@@ -65,7 +115,6 @@
 		<div class="mx-1 h-6 w-px shrink-0 bg-surface-200 dark:bg-surface-700"></div>
 
 		<!-- Structure -->
-		<button onclick={() => onLink?.()} title="Insert link (Cmd+K)" class="flex h-9 min-w-[40px] shrink-0 items-center justify-center rounded-md text-xs font-medium text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">Link</button>
 		<button onclick={() => onList?.()} title="List item (- )" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&bull;</button>
 		<button onclick={() => onCheckbox?.()} title="Checkbox (- [ ] )" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&#9744;</button>
 		<div class="relative shrink-0">

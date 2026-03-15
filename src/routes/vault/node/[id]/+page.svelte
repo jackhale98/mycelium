@@ -158,6 +158,107 @@
 		editorComponent?.insertAtCursor(`<${ds} ${days[d.getDay()]}>`);
 	}
 
+	function todayTimestamp(): string {
+		const d = new Date();
+		const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+		const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+		return `<${ds} ${days[d.getDay()]}>`;
+	}
+
+	/// Find the headline line at or above the cursor, modify it, and update content
+	function modifyNearestHeadline(fn: (line: string) => string) {
+		const lines = editor.content.split('\n');
+		// Find cursor position — approximate from CodeMirror state
+		// If we can't get cursor, modify the last headline
+		let targetLine = -1;
+		for (let i = lines.length - 1; i >= 0; i--) {
+			if (/^\*+\s/.test(lines[i])) { targetLine = i; break; }
+		}
+		if (targetLine === -1) return;
+		lines[targetLine] = fn(lines[targetLine]);
+		editor.updateContent(lines.join('\n'));
+	}
+
+	function onTodo(keyword: string | null) {
+		modifyNearestHeadline(line => {
+			const m = line.match(/^(\*+\s+)/);
+			if (!m) return line;
+			const stars = m[1];
+			let rest = line.slice(stars.length);
+			// Remove existing TODO keyword
+			const kwMatch = rest.match(/^(TODO|DONE|NEXT|WAITING|HOLD|CANCELLED|CANCELED)\s+/);
+			if (kwMatch) rest = rest.slice(kwMatch[0].length);
+			return keyword ? `${stars}${keyword} ${rest}` : `${stars}${rest}`;
+		});
+	}
+
+	function onPriority(priority: string | null) {
+		modifyNearestHeadline(line => {
+			const m = line.match(/^(\*+\s+(?:(?:TODO|DONE|NEXT|WAITING|HOLD|CANCELLED|CANCELED)\s+)?)/);
+			if (!m) return line;
+			const prefix = m[1];
+			let rest = line.slice(prefix.length);
+			// Remove existing priority
+			const prioMatch = rest.match(/^\[#[A-Z]\]\s*/);
+			if (prioMatch) rest = rest.slice(prioMatch[0].length);
+			return priority ? `${prefix}[#${priority}] ${rest}` : `${prefix}${rest}`;
+		});
+	}
+
+	function onDeadline() {
+		const lines = editor.content.split('\n');
+		let targetLine = -1;
+		for (let i = lines.length - 1; i >= 0; i--) {
+			if (/^\*+\s/.test(lines[i])) { targetLine = i; break; }
+		}
+		if (targetLine === -1) return;
+		// Insert DEADLINE on the line after the headline (or after planning/properties)
+		let insertAfter = targetLine;
+		for (let j = targetLine + 1; j < lines.length; j++) {
+			const t = lines[j].trim();
+			if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
+				insertAfter = j;
+				if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
+			} else break;
+		}
+		// Check if DEADLINE already exists on a nearby line
+		for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
+			if (lines[j].includes('DEADLINE:')) {
+				lines[j] = lines[j].replace(/DEADLINE:\s*<[^>]*>/, `DEADLINE: ${todayTimestamp()}`);
+				editor.updateContent(lines.join('\n'));
+				return;
+			}
+		}
+		lines.splice(insertAfter + 1, 0, `DEADLINE: ${todayTimestamp()}`);
+		editor.updateContent(lines.join('\n'));
+	}
+
+	function onScheduled() {
+		const lines = editor.content.split('\n');
+		let targetLine = -1;
+		for (let i = lines.length - 1; i >= 0; i--) {
+			if (/^\*+\s/.test(lines[i])) { targetLine = i; break; }
+		}
+		if (targetLine === -1) return;
+		let insertAfter = targetLine;
+		for (let j = targetLine + 1; j < lines.length; j++) {
+			const t = lines[j].trim();
+			if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
+				insertAfter = j;
+				if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
+			} else break;
+		}
+		for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
+			if (lines[j].includes('SCHEDULED:')) {
+				lines[j] = lines[j].replace(/SCHEDULED:\s*<[^>]*>/, `SCHEDULED: ${todayTimestamp()}`);
+				editor.updateContent(lines.join('\n'));
+				return;
+			}
+		}
+		lines.splice(insertAfter + 1, 0, `SCHEDULED: ${todayTimestamp()}`);
+		editor.updateContent(lines.join('\n'));
+	}
+
 	async function onImage() {
 		try {
 			// Use Tauri dialog to pick an image file
@@ -286,7 +387,7 @@
 
 	<!-- Toolbar only in edit mode -->
 	{#if showSource}
-		<EditorToolbar {onBold} {onItalic} {onCode} {onVerbatim} {onUnderline} {onStrike} {onLink} {onCheckbox} {onHeading} {onList} {onSrcBlock} {onQuote} {onTable} {onTimestamp} {onImage} />
+		<EditorToolbar {onBold} {onItalic} {onCode} {onVerbatim} {onUnderline} {onStrike} {onLink} {onCheckbox} {onHeading} {onList} {onSrcBlock} {onQuote} {onTable} {onTimestamp} {onImage} {onTodo} {onPriority} {onDeadline} {onScheduled} />
 	{/if}
 
 	<MobileNav />
