@@ -27,14 +27,18 @@ pub fn parse_timestamp(s: &str) -> Option<(Timestamp, usize)> {
     let mut day_name = None;
     let mut time = None;
     let mut repeater = None;
+    let mut warning = None;
 
     for &part in &parts[1..] {
         if part.len() == 3 && part.chars().all(|c| c.is_alphabetic()) {
             day_name = Some(part.to_string());
         } else if part.contains(':') && part.len() <= 5 && part.chars().all(|c| c.is_ascii_digit() || c == ':') {
             time = Some(part.to_string());
-        } else if part.starts_with('+') || part.starts_with('.') {
+        } else if part.starts_with('+') || part.starts_with(".+") {
             repeater = Some(part.to_string());
+        } else if part.starts_with('-') && part.len() >= 2 {
+            // Warning period: -3d, -1w, etc.
+            warning = Some(part.to_string());
         }
     }
 
@@ -45,6 +49,7 @@ pub fn parse_timestamp(s: &str) -> Option<(Timestamp, usize)> {
             day_name,
             time,
             repeater,
+            warning,
             raw,
         },
         close_pos + 1,
@@ -136,6 +141,30 @@ mod tests {
         let (ts, _) = parse_timestamp("<2024-01-15 Mon 09:00 +1w>").unwrap();
         assert_eq!(ts.time.as_deref(), Some("09:00"));
         assert_eq!(ts.repeater.as_deref(), Some("+1w"));
+    }
+
+    #[test]
+    fn test_warning_period() {
+        let (ts, _) = parse_timestamp("<2024-01-15 Mon +1m -3d>").unwrap();
+        assert_eq!(ts.repeater.as_deref(), Some("+1m"));
+        assert_eq!(ts.warning.as_deref(), Some("-3d"));
+    }
+
+    #[test]
+    fn test_full_timestamp() {
+        let (ts, _) = parse_timestamp("<2024-01-15 Mon 09:00 ++1w -2d>").unwrap();
+        assert_eq!(ts.date, "2024-01-15");
+        assert_eq!(ts.day_name.as_deref(), Some("Mon"));
+        assert_eq!(ts.time.as_deref(), Some("09:00"));
+        assert_eq!(ts.repeater.as_deref(), Some("++1w"));
+        assert_eq!(ts.warning.as_deref(), Some("-2d"));
+        assert_eq!(ts.raw, "<2024-01-15 Mon 09:00 ++1w -2d>");
+    }
+
+    #[test]
+    fn test_hour_repeater() {
+        let (ts, _) = parse_timestamp("<2024-01-15 Mon 09:00 +4h>").unwrap();
+        assert_eq!(ts.repeater.as_deref(), Some("+4h"));
     }
 
     #[test]

@@ -131,9 +131,11 @@
 				if (t.startsWith(`${type}:`) || t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:')) {
 					if (t.startsWith(`${type}:`)) {
 						planIdx = j;
-						// Extract existing repeater to preserve it
+						// Extract existing repeater and warning to preserve them
 						const repMatch = t.match(/(\+\+?|\.?\+)\d+[hdwmy]/);
 						if (repMatch) existingRepeater = ' ' + repMatch[0];
+						const warnMatch = t.match(/-\d+[hdwmy]/);
+						if (warnMatch) existingRepeater += ' ' + warnMatch[0];
 					}
 					insertAfter = j;
 				} else if (t === ':PROPERTIES:') {

@@ -119,7 +119,10 @@ pub struct Timestamp {
     pub date: String,
     pub day_name: Option<String>,
     pub time: Option<String>,
+    /// Repeater: +1w, ++1m, .+2d, +3h, +1y
     pub repeater: Option<String>,
+    /// Warning period: -3d, -1w
+    pub warning: Option<String>,
     pub raw: String,
 }
 
