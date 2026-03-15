@@ -1,8 +1,17 @@
 # Mycelium
 
-An open-source, cross-platform knowledge base for [org-roam](https://www.orgroam.com/) vaults. Built with Rust, Tauri v2, Svelte 5, and SQLite.
+<p align="center">
+  <img src="app-image.svg" width="128" height="128" alt="Mycelium logo" />
+</p>
 
-Mycelium lets you view, edit, search, and navigate your org-roam notes on desktop and mobile — no Emacs required.
+<p align="center">
+  An open-source, cross-platform knowledge base for <a href="https://www.orgroam.com/">org-roam</a> vaults.<br/>
+  Built with Rust, Tauri v2, Svelte 5, and SQLite.
+</p>
+
+---
+
+Mycelium lets you view, edit, search, and navigate your org-roam notes on desktop and mobile — no Emacs required. Named after the underground fungal networks that connect trees in a forest, Mycelium connects your notes through the same bidirectional linking that makes org-roam powerful.
 
 ## Features
 
