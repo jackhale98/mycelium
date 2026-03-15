@@ -53,9 +53,9 @@ jobs:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri ios init
 
-      - name: Patch iOS project (Info.plist + Swift folder picker)
+      - name: Patch iOS project
         run: |
-          # Patch Info.plist
+          # Patch Info.plist for document access
           PLIST="src-tauri/gen/apple/mycelium_iOS/Info.plist"
           if [ -f "$PLIST" ]; then
             sed -i '' '/<\/dict>/i\
@@ -68,23 +68,12 @@ jobs:
             echo "Patched Info.plist"
           fi
 
-          # Copy Swift folder picker plugin into the generated Xcode project
-          APPLE_DIR="src-tauri/gen/apple"
-          if [ -d "$APPLE_DIR" ]; then
-            cp -r src-tauri/ios-plugins/folder-picker "$APPLE_DIR/FolderPickerPlugin"
-            # Fix the Tauri dependency path for the generated project structure
-            sed -i '' 's|path: "../../gen/apple/.tauri/tauri-api"|path: ".tauri/tauri-api"|' "$APPLE_DIR/FolderPickerPlugin/Package.swift"
-
-            # Add the local package to the Xcode workspace
-            # Append to the Package.swift dependencies in the main project
-            MAIN_PKG="$APPLE_DIR/Package.swift"
-            if [ -f "$MAIN_PKG" ]; then
-              # Add FolderPickerPlugin as a local dependency
-              sed -i '' 's|\]  // dependencies|.package(path: "FolderPickerPlugin"),\n    ]  // dependencies|' "$MAIN_PKG" 2>/dev/null || true
-              sed -i '' 's|\]  // products|.product(name: "FolderPickerPlugin", package: "FolderPickerPlugin"),\n        ]  // products|' "$MAIN_PKG" 2>/dev/null || true
-            fi
-            echo "Added FolderPickerPlugin to Xcode project"
-            ls -la "$APPLE_DIR/FolderPickerPlugin/"
+          # Copy Swift folder picker source files into the iOS project
+          IOS_SRC="src-tauri/gen/apple/mycelium_iOS"
+          if [ -d "$IOS_SRC" ]; then
+            cp src-tauri/ios/Sources/*.swift "$IOS_SRC/"
+            echo "Copied Swift files to $IOS_SRC:"
+            ls "$IOS_SRC/"*.swift
           fi
 
       - name: Prepare App Store Connect API key

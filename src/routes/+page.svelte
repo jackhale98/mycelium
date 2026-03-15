@@ -66,44 +66,44 @@
 	}
 
 	async function handlePickFolder() {
+		if (isMobile()) {
+			// iOS: try native folder picker via WKWebView bridge
+			const w = window as any;
+			if (w.webkit?.messageHandlers?.folderPicker) {
+				try {
+					const path = await new Promise<string | null>((resolve) => {
+						w.__myceliumFolderPickerCallback = resolve;
+						w.webkit.messageHandlers.folderPicker.postMessage('pick');
+						setTimeout(() => { delete w.__myceliumFolderPickerCallback; resolve(null); }, 60000);
+					});
+					if (path) { vaultPath = path; return; }
+				} catch { /* fall through */ }
+			}
+
+			// Fallback: file picker (only grants single file access)
+			try {
+				const { open } = await import('@tauri-apps/plugin-dialog');
+				const file = await open({ filters: [{ name: 'Org files', extensions: ['org'] }], multiple: false });
+				if (file) {
+					let p = file as string;
+					if (p.startsWith('file://')) p = decodeURIComponent(p.substring(7));
+					const slash = p.lastIndexOf('/');
+					if (slash > 0) vaultPath = p.substring(0, slash);
+				}
+			} catch { showFolderBrowser = true; }
+			return;
+		}
+
+		// Desktop: native folder picker
 		try {
 			const { open } = await import('@tauri-apps/plugin-dialog');
-
-			if (isMobile()) {
-				// On iOS: use native file picker to select any .org file,
-				// then derive the vault folder from its parent directory.
-				// This presents the native liquid glass iOS picker UI.
-				const file = await open({
-					title: 'Select any .org file in your vault',
-					filters: [{ name: 'Org files', extensions: ['org'] }],
-					multiple: false,
-				});
-				if (file) {
-					let filePath = file as string;
-					if (filePath.startsWith('file://')) {
-						filePath = decodeURIComponent(filePath.substring(7));
-					}
-					// Get parent directory
-					const lastSlash = filePath.lastIndexOf('/');
-					if (lastSlash > 0) {
-						vaultPath = filePath.substring(0, lastSlash);
-					}
-				}
-			} else {
-				// Desktop: use native folder picker
-				const selected = await open({ directory: true, multiple: false });
-				if (selected) {
-					let path = selected as string;
-					if (path.startsWith('file://')) {
-						path = decodeURIComponent(path.substring(7));
-					}
-					vaultPath = path;
-				}
+			const selected = await open({ directory: true, multiple: false });
+			if (selected) {
+				let p = selected as string;
+				if (p.startsWith('file://')) p = decodeURIComponent(p.substring(7));
+				vaultPath = p;
 			}
-		} catch {
-			// Dialog not available — show in-app folder browser
-			showFolderBrowser = true;
-		}
+		} catch { showFolderBrowser = true; }
 	}
 
 	function handleFolderSelected(path: string) {
