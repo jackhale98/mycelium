@@ -505,8 +505,13 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 	check_vault_changes: () => false,
 	get_agenda: () => MOCK_NODES
 		.filter(n => n.todo || n.scheduled || n.deadline)
+		.map(n => ({
+			file: n.file, line: n.pos, level: n.level,
+			todo: n.todo, priority: n.priority, scheduled: n.scheduled,
+			deadline: n.deadline, title: n.title,
+			node_id: n.id, closed: null, has_id: true,
+		}))
 		.sort((a, b) => {
-			// Deadline first, then scheduled, then priority
 			const dl = (a.deadline ?? '').localeCompare(b.deadline ?? '');
 			if (a.deadline && !b.deadline) return -1;
 			if (!a.deadline && b.deadline) return 1;

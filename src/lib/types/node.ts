@@ -56,3 +56,17 @@ export interface TagCount {
 	tag: string;
 	count: number;
 }
+
+export interface HeadlineRecord {
+	file: string;
+	line: number;
+	level: number;
+	todo: string | null;
+	priority: string | null;
+	scheduled: string | null;
+	deadline: string | null;
+	title: string | null;
+	node_id: string | null;
+	closed: string | null;
+	has_id: boolean;
+}

@@ -53,11 +53,11 @@ pub async fn search_full(
     state.with_db(|conn| query::search_full(conn, &query).map_err(|e| e.to_string()))
 }
 
-/// Get agenda items (all nodes with TODO, SCHEDULED, or DEADLINE)
+/// Get agenda items (ALL headlines with TODO, SCHEDULED, or DEADLINE from ALL org files)
 #[tauri::command]
 pub async fn get_agenda(
     state: State<'_, AppState>,
-) -> Result<Vec<query::NodeRecord>, String> {
+) -> Result<Vec<query::HeadlineRecord>, String> {
     state.with_db(|conn| query::get_agenda_items(conn).map_err(|e| e.to_string()))
 }
 

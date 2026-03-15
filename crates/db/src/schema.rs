@@ -61,6 +61,24 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             properties  TEXT
         );
 
+        -- Headlines table: ALL headlines from ALL org files, with or without :ID:
+        -- Used for agenda view, file browsing of non-roam files
+        CREATE TABLE IF NOT EXISTS headlines (
+            file        TEXT NOT NULL REFERENCES files(file) ON DELETE CASCADE,
+            line        INTEGER NOT NULL,
+            level       INTEGER NOT NULL,
+            todo        TEXT,
+            priority    TEXT,
+            scheduled   TEXT,
+            deadline    TEXT,
+            title       TEXT,
+            node_id     TEXT,
+            closed      TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_headlines_file ON headlines(file);
+        CREATE INDEX IF NOT EXISTS idx_headlines_todo ON headlines(todo);
+
         -- Performance indexes
         CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file);
         CREATE INDEX IF NOT EXISTS idx_links_source ON links(source);

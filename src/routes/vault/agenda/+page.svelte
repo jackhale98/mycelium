@@ -5,9 +5,9 @@
 	import { getAgenda, readFile, saveFile, listNodes } from '$lib/tauri/commands';
 	import { vault } from '$lib/stores/vault.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
-	import type { NodeRecord } from '$lib/types/node';
+	import type { HeadlineRecord } from '$lib/types/node';
 
-	let items = $state<NodeRecord[]>([]);
+	let items = $state<HeadlineRecord[]>([]);
 	let error = $state<string | null>(null);
 	let tab = $state<'agenda' | 'tasks'>('agenda');
 	let taskSearch = $state('');
@@ -63,8 +63,8 @@
 		return out;
 	}
 
-	function itemsForDate(date: string): { node: NodeRecord; reason: 'deadline' | 'scheduled' }[] {
-		const result: { node: NodeRecord; reason: 'deadline' | 'scheduled'; time: string }[] = [];
+	function itemsForDate(date: string): { node: HeadlineRecord; reason: 'deadline' | 'scheduled' }[] {
+		const result: { node: HeadlineRecord; reason: 'deadline' | 'scheduled'; time: string }[] = [];
 		for (const n of items) {
 			if (isDone(n)) continue;
 			if (extractDate(n.deadline) === date) result.push({ node: n, reason: 'deadline', time: extractTime(n.deadline) });
@@ -94,13 +94,13 @@
 
 	// ── Inline state change ─────────────────────────────────────
 
-	async function setState(node: NodeRecord, state: string | null) {
+	async function setState(node: HeadlineRecord, state: string | null) {
 		await modifyHeadline(node, (stars, kw, rest) => {
 			return state ? `${stars}${state} ${rest}` : `${stars}${rest}`;
 		});
 	}
 
-	async function setPriority(node: NodeRecord, priority: string | null) {
+	async function setPriority(node: HeadlineRecord, priority: string | null) {
 		await modifyHeadline(node, (stars, kw, rest) => {
 			const prefix = kw ? `${stars}${kw} ` : stars;
 			const stripped = rest.replace(/^\[#[A-Z]\]\s*/, '');
@@ -109,18 +109,15 @@
 	}
 
 	/** Set or update a DEADLINE/SCHEDULED date+time. Preserves any repeater syntax. */
-	async function setDate(node: NodeRecord, type: 'DEADLINE' | 'SCHEDULED', datetime: string | null) {
-		changingId = node.id;
+	async function setDate(node: HeadlineRecord, type: 'DEADLINE' | 'SCHEDULED', datetime: string | null) {
+		changingId = node.node_id ?? `${node.file}:${node.line}`;
 		try {
 			const content = await readFile(node.file);
 			const lines = content.split('\n');
 
-			let hlIdx = -1;
-			for (let i = 0; i < lines.length; i++) {
-				if (!/^\*+\s/.test(lines[i])) continue;
-				const nearby = lines.slice(i, Math.min(i + 8, lines.length)).join('\n');
-				if (nearby.includes(`:ID: ${node.id}`)) { hlIdx = i; break; }
-			}
+			// Find headline by line number
+			let hlIdx = node.line;
+			if (hlIdx >= lines.length || !/^\*+\s/.test(lines[hlIdx])) hlIdx = -1;
 			if (hlIdx === -1) return;
 
 			let planIdx = -1;
@@ -171,19 +168,19 @@
 		finally { changingId = null; }
 	}
 
-	async function modifyHeadline(node: NodeRecord, fn: (stars: string, kw: string | null, rest: string) => string) {
-		changingId = node.id;
+	async function modifyHeadline(node: HeadlineRecord, fn: (stars: string, kw: string | null, rest: string) => string) {
+		changingId = node.node_id ?? `${node.file}:${node.line}`;
 		try {
 			const content = await readFile(node.file);
 			const lines = content.split('\n');
 			const kwPattern = orgConfig.allKeywords.join('|');
 
+			// Find headline by line number (reliable for all headlines, with or without :ID:)
+			const targetLine = node.line;
 			for (let i = 0; i < lines.length; i++) {
 				const m = lines[i].match(/^(\*+\s+)/);
 				if (!m) continue;
-				// Match by ID in nearby property drawer
-				const nearby = lines.slice(i, Math.min(i + 8, lines.length)).join('\n');
-				if (!nearby.includes(`:ID: ${node.id}`)) continue;
+				if (i !== targetLine) continue;
 
 				const stars = m[1];
 				let rest = lines[i].slice(stars.length);
@@ -285,7 +282,7 @@
 	<MobileNav />
 </div>
 
-{#snippet taskRow(item: NodeRecord)}
+{#snippet taskRow(item: HeadlineRecord)}
 	{@const dlDate = extractDate(item.deadline)}
 	{@const dlTime = extractTime(item.deadline)}
 	{@const scDate = extractDate(item.scheduled)}
@@ -334,11 +331,11 @@
 		</div>
 
 		<!-- Main row -->
-		<div data-inner class="bg-surface-0 dark:bg-surface-950" style="position:relative;display:flex;align-items:center;gap:8px;padding:8px 4px;will-change:transform;{changingId === item.id ? 'opacity:0.5;' : ''}">
+		<div data-inner class="bg-surface-0 dark:bg-surface-950" style="position:relative;display:flex;align-items:center;gap:8px;padding:8px 4px;will-change:transform;{changingId === (item.node_id ?? `${item.file}:${item.line}`) ? 'opacity:0.5;' : ''}">
 			<select
 				value={item.todo ?? ''}
 				onchange={(e) => setState(item, (e.target as HTMLSelectElement).value || null)}
-				disabled={changingId === item.id}
+				disabled={changingId === (item.node_id ?? `${item.file}:${item.line}`)}
 				style="height:28px;flex-shrink:0;border-radius:4px;border:0;padding:0 16px 0 4px;font-size:10px;font-weight:700;color:{isDone(item) ? '#16a34a' : item.todo ? '#dc2626' : '#6b7280'};background:{isDone(item) ? '#f0fdf4' : item.todo ? '#fef2f2' : 'transparent'}"
 			>
 				<option value="">None</option>
@@ -346,7 +343,7 @@
 				{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
 			</select>
 
-			<button onclick={() => navigation.navigateToNode(item.id)} style="min-width:0;flex:1;text-align:left">
+			<button onclick={() => item.node_id ? navigation.navigateToNode(item.node_id) : navigation.navigateToVault()} style="min-width:0;flex:1;text-align:left">
 				<div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{isDone(item) ? 'text-decoration:line-through;opacity:0.6' : 'font-weight:500'}">{item.title ?? 'Untitled'}</div>
 				{#if dlDate || scDate}
 					<div style="display:flex;gap:6px;font-size:10px;margin-top:2px;flex-wrap:wrap">
@@ -367,7 +364,7 @@
 			<select
 				value={item.priority ?? ''}
 				onchange={(e) => setPriority(item, (e.target as HTMLSelectElement).value || null)}
-				disabled={changingId === item.id}
+				disabled={changingId === (item.node_id ?? `${item.file}:${item.line}`)}
 				style="height:28px;flex-shrink:0;border-radius:4px;border:0;padding:0 12px 0 4px;font-size:10px;font-weight:700;color:#ea580c;{item.priority ? 'background:#fff7ed' : 'background:transparent'}"
 			>
 				<option value="">—</option>

@@ -47,6 +47,22 @@ pub struct GraphLink {
     pub target: String,
 }
 
+/// A headline from any org file (with or without :ID:)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeadlineRecord {
+    pub file: String,
+    pub line: i64,
+    pub level: i64,
+    pub todo: Option<String>,
+    pub priority: Option<String>,
+    pub scheduled: Option<String>,
+    pub deadline: Option<String>,
+    pub title: Option<String>,
+    pub node_id: Option<String>,
+    pub closed: Option<String>,
+    pub has_id: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphData {
     pub nodes: Vec<GraphNode>,
@@ -504,11 +520,12 @@ pub fn list_daily_notes(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> 
     rows.collect()
 }
 
-/// Agenda: get all nodes with TODO state, scheduled, or deadline
-pub fn get_agenda_items(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> {
+/// Agenda: get ALL headlines with TODO state, scheduled, or deadline
+/// from ALL org files (not just org-roam nodes with :ID:)
+pub fn get_agenda_items(conn: &Connection) -> rusqlite::Result<Vec<HeadlineRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp
-         FROM nodes
+        "SELECT file, line, level, todo, priority, scheduled, deadline, title, node_id, closed
+         FROM headlines
          WHERE todo IS NOT NULL OR scheduled IS NOT NULL OR deadline IS NOT NULL
          ORDER BY
            CASE WHEN deadline IS NOT NULL THEN 0 ELSE 1 END,
@@ -521,18 +538,19 @@ pub fn get_agenda_items(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> 
     )?;
 
     let rows = stmt.query_map([], |row| {
-        Ok(NodeRecord {
-            id: row.get(0)?,
-            file: row.get(1)?,
+        let node_id: Option<String> = row.get(8)?;
+        Ok(HeadlineRecord {
+            file: row.get(0)?,
+            line: row.get(1)?,
             level: row.get(2)?,
-            pos: row.get(3)?,
-            todo: row.get(4)?,
-            priority: row.get(5)?,
-            scheduled: row.get(6)?,
-            deadline: row.get(7)?,
-            title: row.get(8)?,
-            properties: row.get(9)?,
-            olp: row.get(10)?,
+            todo: row.get(3)?,
+            priority: row.get(4)?,
+            scheduled: row.get(5)?,
+            deadline: row.get(6)?,
+            title: row.get(7)?,
+            has_id: node_id.is_some(),
+            node_id,
+            closed: row.get(9)?,
         })
     })?;
 

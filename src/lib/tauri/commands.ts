@@ -1,4 +1,4 @@
-import type { NodeRecord, BacklinkRecord, ForwardLink, GraphData, SearchResult, TagCount } from '$lib/types/node';
+import type { NodeRecord, BacklinkRecord, ForwardLink, GraphData, SearchResult, TagCount, HeadlineRecord } from '$lib/types/node';
 import type { FileRecord, SyncResult } from '$lib/types/vault';
 import { mockHandlers } from './mock';
 
@@ -126,7 +126,7 @@ export async function importImage(sourcePath: string): Promise<string> {
 }
 
 // Agenda
-export async function getAgenda(): Promise<NodeRecord[]> {
+export async function getAgenda(): Promise<HeadlineRecord[]> {
 	return invoke('get_agenda');
 }
 

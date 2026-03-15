@@ -5,7 +5,7 @@ pub mod sync;
 
 pub use query::{
     BacklinkRecord, FileRecord, ForwardLink, GraphData, GraphLink, GraphNode,
-    NodeRecord, SearchResult, TagCount,
+    HeadlineRecord, NodeRecord, SearchResult, TagCount,
 };
 pub use sync::{SyncError, SyncResult};
 

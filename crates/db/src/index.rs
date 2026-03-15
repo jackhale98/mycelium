@@ -24,6 +24,7 @@ pub fn index_file(conn: &Connection, file_path: &str, content: &str) -> rusqlite
 
     // Delete old data for this file (CASCADE handles nodes, links, etc.)
     tx.execute("DELETE FROM files WHERE file = ?1", [file_path])?;
+    tx.execute("DELETE FROM headlines WHERE file = ?1", [file_path])?;
 
     // If ROAM_EXCLUDE is set, just remove from DB and stop
     if roam_exclude {
@@ -109,19 +110,148 @@ pub fn index_file(conn: &Connection, file_path: &str, content: &str) -> rusqlite
     }
 
     // Update files_fts for full-text body search
-    // Strip org markup for cleaner search (remove property drawers, metadata markers)
     let body = strip_org_markup(content);
-    tx.execute(
-        "DELETE FROM files_fts WHERE file = ?1",
-        [file_path],
-    )?;
+    tx.execute("DELETE FROM files_fts WHERE file = ?1", [file_path])?;
     tx.execute(
         "INSERT INTO files_fts (file, title, body) VALUES (?1, ?2, ?3)",
         rusqlite::params![file_path, title, body],
     )?;
 
+    // Index ALL headlines (with or without :ID:) for agenda support
+    index_all_headlines(&tx, file_path, content)?;
+
     tx.commit()?;
     Ok(())
+}
+
+/// Index all headlines from an org file into the headlines table.
+/// This works for ALL org files, not just org-roam files with :ID:.
+fn index_all_headlines(
+    tx: &rusqlite::Transaction,
+    file_path: &str,
+    content: &str,
+) -> rusqlite::Result<()> {
+    let lines: Vec<&str> = content.lines().collect();
+    let todo_keywords = [
+        "TODO", "DONE", "NEXT", "WAITING", "HOLD", "CANCELLED", "CANCELED",
+    ];
+
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        // Match headline: starts with one or more *
+        if !trimmed.starts_with('*') || !trimmed.contains(' ') {
+            i += 1;
+            continue;
+        }
+
+        let level = trimmed.bytes().take_while(|b| *b == b'*').count();
+        if level == 0 || trimmed.as_bytes().get(level) != Some(&b' ') {
+            i += 1;
+            continue;
+        }
+
+        let mut rest = trimmed[level..].trim();
+
+        // Extract TODO keyword
+        let mut todo: Option<&str> = None;
+        for kw in &todo_keywords {
+            if rest.starts_with(kw) {
+                let after = &rest[kw.len()..];
+                if after.is_empty() || after.starts_with(' ') {
+                    todo = Some(kw);
+                    rest = after.trim_start();
+                    break;
+                }
+            }
+        }
+
+        // Extract priority [#A]
+        let mut priority: Option<String> = None;
+        if rest.len() >= 4 && rest.starts_with("[#") && rest.as_bytes()[3] == b']' {
+            let c = rest.as_bytes()[2] as char;
+            if c.is_ascii_uppercase() {
+                priority = Some(c.to_string());
+                rest = rest[4..].trim_start();
+            }
+        }
+
+        // Extract title (strip tags at end)
+        let title = if let Some(tag_start) = rest.rfind(" :") {
+            let after = &rest[tag_start..];
+            if after.trim().ends_with(':') {
+                rest[..tag_start].trim()
+            } else {
+                rest.trim()
+            }
+        } else {
+            rest.trim()
+        };
+
+        // Look at next lines for planning (SCHEDULED, DEADLINE, CLOSED)
+        let mut scheduled: Option<String> = None;
+        let mut deadline: Option<String> = None;
+        let mut closed: Option<String> = None;
+        let mut node_id: Option<String> = None;
+
+        // Scan next few lines for planning and :ID:
+        for j in (i + 1)..std::cmp::min(i + 8, lines.len()) {
+            let pl = lines[j].trim();
+            if pl.starts_with("SCHEDULED:") || pl.starts_with("DEADLINE:") || pl.starts_with("CLOSED:") {
+                if let Some(ts) = extract_timestamp_raw(pl, "SCHEDULED:") {
+                    scheduled = Some(ts);
+                }
+                if let Some(ts) = extract_timestamp_raw(pl, "DEADLINE:") {
+                    deadline = Some(ts);
+                }
+                if let Some(ts) = extract_timestamp_raw(pl, "CLOSED:") {
+                    closed = Some(ts);
+                }
+            } else if pl.starts_with(":ID:") {
+                node_id = Some(pl.trim_start_matches(":ID:").trim().to_string());
+            } else if pl == ":PROPERTIES:" || pl == ":END:" {
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        // Only insert if there's something useful (todo, date, or title)
+        tx.execute(
+            "INSERT INTO headlines (file, line, level, todo, priority, scheduled, deadline, title, node_id, closed)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                file_path,
+                i as i64,
+                level as i64,
+                todo,
+                priority,
+                scheduled,
+                deadline,
+                title,
+                node_id,
+                closed,
+            ],
+        )?;
+
+        i += 1;
+    }
+
+    Ok(())
+}
+
+fn extract_timestamp_raw(line: &str, keyword: &str) -> Option<String> {
+    let idx = line.find(keyword)?;
+    let after = &line[idx + keyword.len()..].trim();
+    let start = after.find('<')?;
+    let end = after.find('>')?;
+    if end > start {
+        Some(after[start..=end].to_string())
+    } else {
+        None
+    }
 }
 
 /// Strip org markup to produce plain text for FTS indexing
