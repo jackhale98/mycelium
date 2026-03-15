@@ -7,7 +7,8 @@ export interface OrgConfig {
 	priorities: string[];
 }
 
-// Default org-mode keywords and priorities
+// Org-mode defaults: only TODO and DONE out of the box.
+// Users can add NEXT, WAITING, HOLD, CANCELLED etc. in settings.
 const DEFAULT_CONFIG: OrgConfig = {
 	todoKeywords: ['TODO'],
 	doneKeywords: ['DONE'],
