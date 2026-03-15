@@ -108,13 +108,13 @@
 		});
 	}
 
-	async function setDate(node: NodeRecord, type: 'DEADLINE' | 'SCHEDULED', date: string | null) {
+	/** Set or update a DEADLINE/SCHEDULED date+time. Preserves any repeater syntax. */
+	async function setDate(node: NodeRecord, type: 'DEADLINE' | 'SCHEDULED', datetime: string | null) {
 		changingId = node.id;
 		try {
 			const content = await readFile(node.file);
 			const lines = content.split('\n');
 
-			// Find the headline for this node
 			let hlIdx = -1;
 			for (let i = 0; i < lines.length; i++) {
 				if (!/^\*+\s/.test(lines[i])) continue;
@@ -123,13 +123,18 @@
 			}
 			if (hlIdx === -1) return;
 
-			// Find existing planning line or insertion point
 			let planIdx = -1;
 			let insertAfter = hlIdx;
+			let existingRepeater = '';
 			for (let j = hlIdx + 1; j < lines.length && j < hlIdx + 6; j++) {
 				const t = lines[j].trim();
 				if (t.startsWith(`${type}:`) || t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:')) {
-					if (t.startsWith(`${type}:`)) planIdx = j;
+					if (t.startsWith(`${type}:`)) {
+						planIdx = j;
+						// Extract existing repeater to preserve it
+						const repMatch = t.match(/(\+\+?|\.?\+)\d+[hdwmy]/);
+						if (repMatch) existingRepeater = ' ' + repMatch[0];
+					}
 					insertAfter = j;
 				} else if (t === ':PROPERTIES:') {
 					while (j < lines.length && lines[j].trim() !== ':END:') j++;
@@ -137,20 +142,22 @@
 				} else break;
 			}
 
-			if (date) {
+			if (datetime) {
+				// datetime can be "2026-03-20" or "2026-03-20T14:00"
+				const [datePart, timePart] = datetime.includes('T') ? datetime.split('T') : [datetime, ''];
 				const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-				const d = new Date(date + 'T12:00:00');
-				const ts = `<${date} ${dayNames[d.getDay()]}>`;
+				const d = new Date(datePart + 'T12:00:00');
+				let ts = `<${datePart} ${dayNames[d.getDay()]}`;
+				if (timePart) ts += ` ${timePart}`;
+				ts += `${existingRepeater}>`;
 				const newLine = `${type}: ${ts}`;
 
 				if (planIdx >= 0) {
-					// Replace existing
 					lines[planIdx] = lines[planIdx].replace(new RegExp(`${type}:\\s*<[^>]*>`), `${type}: ${ts}`);
 				} else {
 					lines.splice(insertAfter + 1, 0, newLine);
 				}
 			} else if (planIdx >= 0) {
-				// Remove the planning keyword from the line
 				lines[planIdx] = lines[planIdx].replace(new RegExp(`\\s*${type}:\\s*<[^>]*>`), '').trim();
 				if (!lines[planIdx]) lines.splice(planIdx, 1);
 			}
@@ -314,13 +321,13 @@
 		<div data-actions style="position:absolute;right:0;top:0;bottom:0;display:flex;opacity:0">
 			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#dc2626;color:white;font-size:12px;font-weight:600;cursor:pointer;gap:2px">
 				Deadline
-				<input type="date" value={dlDate} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
-				<span style="font-size:10px;opacity:0.8">{dlDate || 'set'}</span>
+				<input type="datetime-local" value={dlDate && dlTime ? `${dlDate}T${dlTime}` : dlDate} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
+				<span style="font-size:10px;opacity:0.8">{dlDate ? (dlTime ? `${dlDate} ${dlTime}` : dlDate) : 'set'}</span>
 			</label>
 			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#2563eb;color:white;font-size:12px;font-weight:600;cursor:pointer;gap:2px">
 				Schedule
-				<input type="date" value={scDate} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
-				<span style="font-size:10px;opacity:0.8">{scDate || 'set'}</span>
+				<input type="datetime-local" value={scDate && scTime ? `${scDate}T${scTime}` : scDate} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
+				<span style="font-size:10px;opacity:0.8">{scDate ? (scTime ? `${scDate} ${scTime}` : scDate) : 'set'}</span>
 			</label>
 		</div>
 

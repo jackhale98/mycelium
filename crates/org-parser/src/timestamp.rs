@@ -112,6 +112,33 @@ mod tests {
     }
 
     #[test]
+    fn test_repeater_timestamp() {
+        let (ts, _) = parse_timestamp("<2024-01-15 Mon +1w>").unwrap();
+        assert_eq!(ts.date, "2024-01-15");
+        assert_eq!(ts.repeater.as_deref(), Some("+1w"));
+        assert_eq!(ts.raw, "<2024-01-15 Mon +1w>");
+    }
+
+    #[test]
+    fn test_double_plus_repeater() {
+        let (ts, _) = parse_timestamp("<2024-01-15 Mon ++1m>").unwrap();
+        assert_eq!(ts.repeater.as_deref(), Some("++1m"));
+    }
+
+    #[test]
+    fn test_dot_plus_repeater() {
+        let (ts, _) = parse_timestamp("<2024-03-01 Fri .+2d>").unwrap();
+        assert_eq!(ts.repeater.as_deref(), Some(".+2d"));
+    }
+
+    #[test]
+    fn test_timestamp_with_time_and_repeater() {
+        let (ts, _) = parse_timestamp("<2024-01-15 Mon 09:00 +1w>").unwrap();
+        assert_eq!(ts.time.as_deref(), Some("09:00"));
+        assert_eq!(ts.repeater.as_deref(), Some("+1w"));
+    }
+
+    #[test]
     fn test_not_a_timestamp() {
         assert!(parse_timestamp("hello").is_none());
         assert!(parse_timestamp("<not-a-date>").is_none());
