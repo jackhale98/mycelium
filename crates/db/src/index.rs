@@ -31,8 +31,9 @@ pub fn index_file(conn: &Connection, file_path: &str, content: &str) -> rusqlite
     for node in &nodes {
         let olp_json = serde_json::to_string(&node.olp).unwrap_or_default();
 
+        // INSERT OR REPLACE handles duplicate :ID: across files gracefully
         tx.execute(
-            "INSERT INTO nodes (id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp)
+            "INSERT OR REPLACE INTO nodes (id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 node.id,
@@ -65,10 +66,16 @@ pub fn index_file(conn: &Connection, file_path: &str, content: &str) -> rusqlite
             )?;
         }
 
-        // Insert tags (headline tags + filetags for level-0 or first node)
+        // Insert tags: node.tags already includes filetags for level-0 (file-level) nodes
+        // For level-1 (top-level headlines), also add filetags
         let mut all_tags = node.tags.clone();
         if node.level == 1 {
-            all_tags.extend(filetags.clone());
+            // Avoid duplicates — only add filetags not already present
+            for ft in &filetags {
+                if !all_tags.contains(ft) {
+                    all_tags.push(ft.clone());
+                }
+            }
         }
         for tag in &all_tags {
             tx.execute(
