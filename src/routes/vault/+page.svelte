@@ -8,6 +8,7 @@
 	import { theme } from '$lib/stores/theme.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import CreateNodeModal from '$lib/components/common/CreateNodeModal.svelte';
+	import QuickCapture from '$lib/components/common/QuickCapture.svelte';
 	import type { TagCount } from '$lib/types/node';
 
 	let showCreateModal = $state(false);
@@ -209,3 +210,4 @@
 </div>
 
 <CreateNodeModal open={showCreateModal} onclose={() => (showCreateModal = false)} />
+<QuickCapture />

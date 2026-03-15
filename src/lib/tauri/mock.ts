@@ -466,4 +466,15 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 	rename_node: () => undefined,
 	import_image: () => 'images/demo-image.png',
 	rebuild_database: () => ({ total_files: 5, indexed: 5, skipped: 0, removed: 0 }),
+	get_agenda: () => MOCK_NODES.filter(n => n.todo || n.scheduled || n.deadline),
+	get_unlinked_mentions: (args: Record<string, unknown>) => {
+		const nid = args.nodeId as string;
+		const nd = MOCK_NODES.find(n => n.id === nid);
+		if (!nd?.title) return [];
+		return MOCK_NODES.filter(n => n.id !== nid).slice(0, 2).map(n => ({
+			id: n.id, file: n.file, title: n.title,
+			snippet: `...mentions "${nd.title}" in the text...`, match_type: 'mention',
+		}));
+	},
+	quick_capture: () => '/vault/daily/20260315-2026_03_15.org',
 };

@@ -63,6 +63,83 @@ pub async fn save_file(
     Ok(())
 }
 
+/// Quick capture: append a text snippet to today's daily note.
+/// Creates the daily note if it doesn't exist.
+/// This is the fastest way to jot down a thought on mobile.
+#[tauri::command]
+pub async fn quick_capture(
+    app: AppHandle,
+    text: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let vault_path = state.vault_path()?;
+    let daily_dir = vault_path.join("daily");
+    std::fs::create_dir_all(&daily_dir)
+        .map_err(|e| format!("Failed to create daily directory: {e}"))?;
+
+    // Get today's date
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (year, month, day, _, _, _) = unix_to_datetime(secs);
+    let date = format!("{year:04}-{month:02}-{day:02}");
+
+    // Find or create today's daily note
+    let daily_file = find_daily_file(&daily_dir, &date);
+    let (file_path, mut content) = match daily_file {
+        Some(path) => {
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read daily note: {e}"))?;
+            (path, content)
+        }
+        None => {
+            let id = uuid::Uuid::new_v4().to_string();
+            let ts = timestamp_now();
+            let slug = date.replace('-', "_");
+            let path = daily_dir.join(format!("{ts}-{slug}.org"));
+            let content = format!(":PROPERTIES:\n:ID: {id}\n:END:\n#+TITLE: {date}\n\n");
+            (path, content)
+        }
+    };
+
+    // Append the captured text
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    let (hour, min, _) = {
+        let s = secs;
+        (((s / 3600) % 24) as u32, ((s / 60) % 60) as u32, (s % 60) as u32)
+    };
+    content.push_str(&format!("- [{hour:02}:{min:02}] {text}\n"));
+
+    std::fs::write(&file_path, &content)
+        .map_err(|e| format!("Failed to write: {e}"))?;
+
+    let file_str = file_path.to_string_lossy().to_string();
+    state.with_db(|conn| {
+        index::index_file(conn, &file_str, &content)
+            .map_err(|e| format!("Failed to index: {e}"))
+    })?;
+
+    let _ = app.emit("db-updated", ());
+    Ok(file_str)
+}
+
+/// Find an existing daily note file for a given date
+fn find_daily_file(daily_dir: &std::path::Path, date: &str) -> Option<std::path::PathBuf> {
+    let date_slug = date.replace('-', "_");
+    if let Ok(entries) = std::fs::read_dir(daily_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".org") && (name.contains(date) || name.contains(&date_slug)) {
+                return Some(entry.path());
+            }
+        }
+    }
+    None
+}
+
 /// Create a new org file with a UUID node (file-level property drawer).
 /// Uses org-roam naming convention: YYYYMMDDHHmmss-slug.org
 #[tauri::command]

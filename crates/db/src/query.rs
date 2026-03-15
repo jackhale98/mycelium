@@ -504,6 +504,107 @@ pub fn list_daily_notes(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> 
     rows.collect()
 }
 
+/// Agenda: get all nodes with TODO state, scheduled, or deadline
+pub fn get_agenda_items(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp
+         FROM nodes
+         WHERE todo IS NOT NULL OR scheduled IS NOT NULL OR deadline IS NOT NULL
+         ORDER BY
+           CASE WHEN deadline IS NOT NULL THEN 0 ELSE 1 END,
+           deadline ASC,
+           CASE WHEN scheduled IS NOT NULL THEN 0 ELSE 1 END,
+           scheduled ASC,
+           CASE WHEN priority IS NOT NULL THEN 0 ELSE 1 END,
+           priority ASC,
+           title ASC",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(NodeRecord {
+            id: row.get(0)?,
+            file: row.get(1)?,
+            level: row.get(2)?,
+            pos: row.get(3)?,
+            todo: row.get(4)?,
+            priority: row.get(5)?,
+            scheduled: row.get(6)?,
+            deadline: row.get(7)?,
+            title: row.get(8)?,
+            properties: row.get(9)?,
+            olp: row.get(10)?,
+        })
+    })?;
+
+    rows.collect()
+}
+
+/// Unlinked mentions: find nodes whose title appears in other files' body content
+/// but without an explicit [[id:...]] link
+pub fn get_unlinked_mentions(conn: &Connection, node_id: &str) -> rusqlite::Result<Vec<SearchResult>> {
+    // Get the node's title
+    let title: Option<String> = conn
+        .query_row("SELECT title FROM nodes WHERE id = ?1", [node_id], |row| row.get(0))
+        .ok();
+
+    let title = match title {
+        Some(t) if t.len() >= 3 => t, // Only search if title is at least 3 chars
+        _ => return Ok(Vec::new()),
+    };
+
+    // Find files that mention this title in body text but don't have a link to this node
+    let mut stmt = conn.prepare(
+        "SELECT f.file, f.title, snippet(files_fts, 2, '<<', '>>', '...', 30)
+         FROM files_fts f
+         WHERE files_fts MATCH ?1
+         ORDER BY rank
+         LIMIT 20",
+    )?;
+
+    let linked_files: std::collections::HashSet<String> = conn
+        .prepare("SELECT DISTINCT n.file FROM links l JOIN nodes n ON n.id = l.source WHERE l.dest = ?1")?
+        .query_map([node_id], |row| row.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Also get the node's own file to exclude it
+    let own_file: Option<String> = conn
+        .query_row("SELECT file FROM nodes WHERE id = ?1", [node_id], |row| row.get(0))
+        .ok();
+
+    let rows = stmt.query_map([&title], |row| {
+        let file: String = row.get(0)?;
+        let file_title: Option<String> = row.get(1)?;
+        let snippet: Option<String> = row.get(2)?;
+        Ok((file, file_title, snippet))
+    })?;
+
+    let mut results = Vec::new();
+    for r in rows {
+        if let Ok((file, file_title, snippet)) = r {
+            // Exclude the node's own file and files that already link to this node
+            if own_file.as_deref() == Some(&file) { continue; }
+            if linked_files.contains(&file) { continue; }
+
+            let file_node_id: Option<String> = conn
+                .query_row("SELECT id FROM nodes WHERE file = ?1 ORDER BY pos LIMIT 1", [&file], |row| row.get(0))
+                .ok();
+
+            if let Some(id) = file_node_id {
+                results.push(SearchResult {
+                    id,
+                    file,
+                    title: file_title,
+                    snippet,
+                    match_type: "mention".to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(results)
+}
+
 /// Helper trait for optional query results
 trait OptionalExt<T> {
     fn optional(self) -> rusqlite::Result<Option<T>>;

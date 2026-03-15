@@ -120,3 +120,18 @@ export async function renameNode(nodeId: string, newTitle: string): Promise<void
 export async function importImage(sourcePath: string): Promise<string> {
 	return invoke('import_image', { sourcePath });
 }
+
+// Agenda
+export async function getAgenda(): Promise<NodeRecord[]> {
+	return invoke('get_agenda');
+}
+
+// Unlinked mentions
+export async function getUnlinkedMentions(nodeId: string): Promise<SearchResult[]> {
+	return invoke('get_unlinked_mentions', { nodeId });
+}
+
+// Quick capture
+export async function quickCapture(text: string): Promise<string> {
+	return invoke('quick_capture', { text });
+}

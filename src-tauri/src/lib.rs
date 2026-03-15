@@ -20,9 +20,11 @@ pub fn run() {
             commands::node::get_node,
             commands::node::list_nodes,
             commands::node::get_backlinks,
+            commands::node::get_forward_links,
+            commands::node::get_agenda,
+            commands::node::get_unlinked_mentions,
             commands::node::search_nodes,
             commands::node::search_full,
-            commands::node::get_forward_links,
             commands::node::export_markdown,
             commands::node::export_html,
             commands::node::rename_node,
@@ -31,6 +33,7 @@ pub fn run() {
             commands::editor::save_file,
             commands::editor::create_file,
             commands::editor::import_image,
+            commands::editor::quick_capture,
             // Graph
             commands::graph::get_graph_data,
             // Daily notes

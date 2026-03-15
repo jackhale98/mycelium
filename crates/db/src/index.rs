@@ -8,6 +8,11 @@ pub fn index_file(conn: &Connection, file_path: &str, content: &str) -> rusqlite
     let hash = compute_hash(content);
     let doc = org_parser::parse(content);
 
+    // Check for #+ROAM_EXCLUDE: t — skip indexing if present
+    let roam_exclude = doc.metadata.iter().any(|m| {
+        m.key.eq_ignore_ascii_case("ROAM_EXCLUDE") && m.value.trim().eq_ignore_ascii_case("t")
+    });
+
     let title = metadata::get_title(&doc.metadata)
         .map(|s| s.to_string());
     let filetags = metadata::get_filetags(&doc.metadata);
@@ -19,6 +24,13 @@ pub fn index_file(conn: &Connection, file_path: &str, content: &str) -> rusqlite
 
     // Delete old data for this file (CASCADE handles nodes, links, etc.)
     tx.execute("DELETE FROM files WHERE file = ?1", [file_path])?;
+
+    // If ROAM_EXCLUDE is set, just remove from DB and stop
+    if roam_exclude {
+        tx.execute("DELETE FROM files_fts WHERE file = ?1", [file_path])?;
+        tx.commit()?;
+        return Ok(());
+    }
 
     // Insert file record
     tx.execute(

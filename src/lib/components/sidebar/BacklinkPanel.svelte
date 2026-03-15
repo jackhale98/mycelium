@@ -1,17 +1,20 @@
 <script lang="ts">
 	import { navigation } from '$lib/stores/navigation.svelte';
-	import type { BacklinkRecord, ForwardLink } from '$lib/types/node';
+	import type { BacklinkRecord, ForwardLink, SearchResult } from '$lib/types/node';
 
 	let {
 		backlinks = [],
 		forwardLinks = [],
+		unlinkedMentions = [],
 	}: {
 		backlinks?: BacklinkRecord[];
 		forwardLinks?: ForwardLink[];
+		unlinkedMentions?: SearchResult[];
 	} = $props();
 
 	let backlinkExpanded = $state(true);
 	let forwardExpanded = $state(true);
+	let mentionsExpanded = $state(false);
 
 	function stripOrg(text: string): string {
 		return text
@@ -127,7 +130,42 @@
 	</div>
 {/if}
 
-{#if backlinks.length === 0 && forwardLinks.length === 0}
+<!-- Unlinked mentions -->
+{#if unlinkedMentions.length > 0}
+	<div class="mt-3 rounded-xl border border-surface-200 dark:border-surface-700">
+		<button
+			onclick={() => (mentionsExpanded = !mentionsExpanded)}
+			class="flex w-full items-center justify-between px-4 py-3"
+		>
+			<div class="flex items-center gap-2">
+				<svg class="h-4 w-4 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+				</svg>
+				<span class="text-sm font-semibold">Unlinked Mentions</span>
+				<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+					{unlinkedMentions.length}
+				</span>
+			</div>
+			<svg class="h-4 w-4 text-surface-700 transition-transform dark:text-surface-300" class:rotate-180={mentionsExpanded} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+		</button>
+		{#if mentionsExpanded}
+			<ul class="border-t border-surface-200 dark:border-surface-700">
+				{#each unlinkedMentions as m}
+					<li class="border-b border-surface-100 last:border-b-0 dark:border-surface-800">
+						<button onclick={() => navigation.navigateToNode(m.id)} class="w-full px-4 py-3 text-left hover:bg-surface-50 dark:hover:bg-surface-800/50">
+							<div class="text-sm font-medium">{m.title ?? m.file.split('/').pop()}</div>
+							{#if m.snippet}
+								<p class="mt-1 text-xs text-surface-700 dark:text-surface-300 line-clamp-2">{m.snippet}</p>
+							{/if}
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
+{/if}
+
+{#if backlinks.length === 0 && forwardLinks.length === 0 && unlinkedMentions.length === 0}
 	<div class="mt-6 rounded-xl border border-dashed border-surface-200 p-4 text-center dark:border-surface-700">
 		<p class="text-xs text-surface-700 dark:text-surface-300">
 			No links yet. Type <code class="rounded bg-surface-100 px-1 dark:bg-surface-800">[[</code> in the editor to link to other nodes.

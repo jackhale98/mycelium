@@ -53,6 +53,23 @@ pub async fn search_full(
     state.with_db(|conn| query::search_full(conn, &query).map_err(|e| e.to_string()))
 }
 
+/// Get agenda items (all nodes with TODO, SCHEDULED, or DEADLINE)
+#[tauri::command]
+pub async fn get_agenda(
+    state: State<'_, AppState>,
+) -> Result<Vec<query::NodeRecord>, String> {
+    state.with_db(|conn| query::get_agenda_items(conn).map_err(|e| e.to_string()))
+}
+
+/// Get unlinked mentions for a node (title appears in other files without explicit link)
+#[tauri::command]
+pub async fn get_unlinked_mentions(
+    node_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<query::SearchResult>, String> {
+    state.with_db(|conn| query::get_unlinked_mentions(conn, &node_id).map_err(|e| e.to_string()))
+}
+
 /// Export a file as Markdown
 #[tauri::command]
 pub async fn export_markdown(

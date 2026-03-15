@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { vault } from '$lib/stores/vault.svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
+	import { createFile, listNodes, listFiles } from '$lib/tauri/commands';
 	import type { NodeRecord } from '$lib/types/node';
 
 	let {
@@ -8,11 +9,13 @@
 		mode = 'navigate' as 'navigate' | 'insert-link',
 		onclose,
 		oninsert,
+		oncreateinsert,
 	}: {
 		open?: boolean;
 		mode?: 'navigate' | 'insert-link';
 		onclose?: () => void;
 		oninsert?: (node: NodeRecord) => void;
+		oncreateinsert?: (node: NodeRecord) => void;
 	} = $props();
 
 	let query = $state('');
@@ -46,6 +49,36 @@
 		} else if (e.key === 'Escape') {
 			onclose?.();
 		}
+	}
+
+	let creating = $state(false);
+
+	async function createAndInsert() {
+		if (!query.trim() || creating) return;
+		creating = true;
+		try {
+			await createFile(query.trim());
+			const nodes = await listNodes();
+			const files = await listFiles();
+			vault.updateNodes(nodes);
+			vault.updateFiles(files);
+			// Find the newly created node
+			const newNode = nodes.find(n => n.title === query.trim());
+			if (newNode) {
+				if (mode === 'insert-link') {
+					oninsert?.(newNode);
+				} else {
+					navigation.navigateToNode(newNode.id);
+				}
+			}
+		} catch (e) {
+			alert(String(e));
+		} finally {
+			creating = false;
+		}
+		query = '';
+		selectedIndex = 0;
+		onclose?.();
 	}
 
 	function selectNode(node: NodeRecord) {
@@ -133,7 +166,20 @@
 					</button>
 				</li>
 			{/each}
-			{#if filtered().length === 0}
+			{#if query.trim() && mode === 'insert-link'}
+				<li>
+					<button
+						onclick={createAndInsert}
+						disabled={creating}
+						class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-mycelium-50 dark:hover:bg-mycelium-950"
+					>
+						<svg class="h-4 w-4 shrink-0" style="color:#16a34a" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+						<div class="min-w-0 flex-1">
+							<div class="font-medium" style="color:#16a34a">{creating ? 'Creating...' : `Create "${query.trim()}" and insert link`}</div>
+						</div>
+					</button>
+				</li>
+			{:else if filtered().length === 0}
 				<li class="px-3 py-4 text-center text-sm text-surface-700 dark:text-surface-300">
 					No matching nodes
 				</li>

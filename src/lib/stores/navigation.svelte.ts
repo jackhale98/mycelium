@@ -1,4 +1,4 @@
-export type Tab = 'files' | 'graph' | 'search' | 'daily' | 'settings';
+export type Tab = 'files' | 'graph' | 'search' | 'daily' | 'agenda' | 'settings';
 
 class NavigationStore {
 	activeTab = $state<Tab>('files');

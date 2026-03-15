@@ -4,8 +4,8 @@
 	import { editor } from '$lib/stores/editor.svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import {
-		getNode, getBacklinks, getForwardLinks,
-		readFile, saveFile, listNodes,
+		getNode, getBacklinks, getForwardLinks, getUnlinkedMentions,
+		readFile, saveFile, listNodes, createFile,
 		exportMarkdown, exportHtml, renameNode, importImage,
 	} from '$lib/tauri/commands';
 	import RenderedView from '$lib/components/editor/RenderedView.svelte';
@@ -15,11 +15,12 @@
 	import OutlinePanel from '$lib/components/sidebar/OutlinePanel.svelte';
 	import QuickSwitcher from '$lib/components/common/QuickSwitcher.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
-	import type { NodeRecord, BacklinkRecord, ForwardLink } from '$lib/types/node';
+	import type { NodeRecord, BacklinkRecord, ForwardLink, SearchResult } from '$lib/types/node';
 
 	let node = $state<NodeRecord | null>(null);
 	let backlinks = $state<BacklinkRecord[]>([]);
 	let forwardLinks = $state<ForwardLink[]>([]);
+	let unlinkedMentions = $state<SearchResult[]>([]);
 	let error = $state<string | null>(null);
 	let autoSaveTimer: ReturnType<typeof setTimeout>;
 	let showLinkSwitcher = $state(false);
@@ -66,8 +67,8 @@
 			if (!node) { error = 'Node not found'; return; }
 			const content = await readFile(node.file);
 			editor.openFile(node.file, content, id);
-			const [bl, fl] = await Promise.all([getBacklinks(id), getForwardLinks(id)]);
-			backlinks = bl; forwardLinks = fl;
+			const [bl, fl, um] = await Promise.all([getBacklinks(id), getForwardLinks(id), getUnlinkedMentions(id)]);
+			backlinks = bl; forwardLinks = fl; unlinkedMentions = um;
 		} catch (e) { error = String(e); }
 	}
 
@@ -278,7 +279,7 @@
 				</button>
 			</div>
 			<div class="p-3">
-				<BacklinkPanel {backlinks} {forwardLinks} />
+				<BacklinkPanel {backlinks} {forwardLinks} {unlinkedMentions} />
 			</div>
 		</aside>
 	</div>
