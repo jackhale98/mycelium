@@ -63,7 +63,8 @@ pub async fn save_file(
     Ok(())
 }
 
-/// Create a new org file with a UUID node (file-level property drawer)
+/// Create a new org file with a UUID node (file-level property drawer).
+/// Uses org-roam naming convention: YYYYMMDDHHmmss-slug.org
 #[tauri::command]
 pub async fn create_file(
     app: AppHandle,
@@ -73,8 +74,10 @@ pub async fn create_file(
     let vault_path = state.vault_path()?;
     let id = uuid::Uuid::new_v4().to_string();
 
-    // Create filename from title
-    let filename = sanitize_filename(&title);
+    // Org-roam filename convention: YYYYMMDDHHmmss-slug.org
+    let timestamp = timestamp_now();
+    let slug = slugify(&title);
+    let filename = format!("{timestamp}-{slug}");
     let file_path = vault_path.join(format!("{filename}.org"));
 
     if file_path.exists() {
@@ -95,9 +98,7 @@ pub async fn create_file(
             .map_err(|e| format!("Failed to index file: {e}"))
     })?;
 
-    // Emit db-updated event
     let _ = app.emit("db-updated", ());
-
     Ok(file_path_str)
 }
 
@@ -152,18 +153,80 @@ pub async fn import_image(
     Ok(format!("images/{dest_name}"))
 }
 
-fn sanitize_filename(title: &str) -> String {
+/// Generate current timestamp in YYYYMMDDHHmmss format.
+pub fn timestamp_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (year, month, day, hour, min, sec) = unix_to_datetime(secs);
+    format!("{year:04}{month:02}{day:02}{hour:02}{min:02}{sec:02}")
+}
+
+/// Convert a title to an org-roam compatible slug.
+/// "My Great Note!" -> "my_great_note"
+fn slugify(title: &str) -> String {
     title
         .chars()
         .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' {
-                c
-            } else {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else if c == ' ' || c == '-' || c == '_' {
                 '_'
+            } else {
+                // skip other characters
+                '\0'
             }
         })
+        .filter(|c| *c != '\0')
         .collect::<String>()
-        .trim()
-        .replace(' ', "-")
-        .to_lowercase()
+        // Collapse multiple underscores
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+/// Convert unix timestamp to (year, month, day, hour, minute, second).
+/// Simple implementation without chrono dependency.
+fn unix_to_datetime(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
+    let sec = (secs % 60) as u32;
+    let min = ((secs / 60) % 60) as u32;
+    let hour = ((secs / 3600) % 24) as u32;
+
+    let mut days = (secs / 86400) as u32;
+
+    // Calculate year
+    let mut year = 1970u32;
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+
+    // Calculate month and day
+    let month_days = if is_leap_year(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+
+    let mut month = 1u32;
+    for md in month_days {
+        if days < md {
+            break;
+        }
+        days -= md;
+        month += 1;
+    }
+    let day = days + 1;
+
+    (year, month, day, hour, min, sec)
+}
+
+fn is_leap_year(y: u32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
 }

@@ -1,9 +1,10 @@
 use crate::state::AppState;
+use crate::commands::editor::timestamp_now;
 use db::{index, query};
 use tauri::{AppHandle, Emitter, State};
 
 /// Get or create today's daily note.
-/// Returns the node record if it exists, or creates a new file and returns that.
+/// Uses org-roam naming: daily/YYYYMMDDHHmmss-YYYY_MM_DD.org
 #[tauri::command]
 pub async fn get_or_create_daily(
     app: AppHandle,
@@ -26,7 +27,9 @@ pub async fn get_or_create_daily(
         .map_err(|e| format!("Failed to create daily directory: {e}"))?;
 
     let id = uuid::Uuid::new_v4().to_string();
-    let file_path = daily_dir.join(format!("{date}.org"));
+    let ts = timestamp_now();
+    let slug = date.replace('-', "_");
+    let file_path = daily_dir.join(format!("{ts}-{slug}.org"));
 
     let content = format!(
         ":PROPERTIES:\n:ID: {id}\n:END:\n#+TITLE: {date}\n\n"
@@ -43,7 +46,6 @@ pub async fn get_or_create_daily(
 
     let _ = app.emit("db-updated", ());
 
-    // Return the newly created node
     state
         .with_db(|conn| query::get_node(conn, &id).map_err(|e| e.to_string()))?
         .ok_or_else(|| "Failed to retrieve created daily note".to_string())
