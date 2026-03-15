@@ -430,19 +430,19 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 			linkCounts[l.targetNodeId] = (linkCounts[l.targetNodeId] ?? 0) + 1;
 		}
 
-		// Only include file-level nodes in the graph (level 0)
-		const graphNodes = MOCK_NODES.filter(n => n.level === 0).map(n => ({
+		// Include ALL nodes in the graph (not just file-level)
+		const allNodeIds = new Set(MOCK_NODES.map(n => n.id));
+		const graphNodes = MOCK_NODES.map(n => ({
 			id: n.id,
 			title: n.title,
 			tags: MOCK_TAGS[n.id] ?? [],
 			link_count: linkCounts[n.id] ?? 0,
 		}));
 
-		// Deduplicate links (only between file-level nodes)
-		const fileNodeIds = new Set(graphNodes.map(n => n.id));
+		// Deduplicate links between nodes that exist
 		const seen = new Set<string>();
 		const graphLinks = ALL_LINKS
-			.filter(l => fileNodeIds.has(l.sourceNodeId) && fileNodeIds.has(l.targetNodeId))
+			.filter(l => allNodeIds.has(l.sourceNodeId) && allNodeIds.has(l.targetNodeId))
 			.filter(l => {
 				const key = `${l.sourceNodeId}->${l.targetNodeId}`;
 				if (seen.has(key)) return false;
