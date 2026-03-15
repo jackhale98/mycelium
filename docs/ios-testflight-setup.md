@@ -212,6 +212,40 @@ crate-type = ["lib", "cdylib", "staticlib"]
 The `"tauri": "tauri"` script is required by `tauri-action` for desktop builds.
 The `@tauri-apps/cli` devDependency provides the `tauri` binary for `npx tauri`.
 
+### iOS-specific considerations
+
+**App icon**: `icon.png` in `src-tauri/icons/` must be 1024x1024 pixels. This is
+the source used by Tauri to generate all required iOS icon sizes. If the icon is
+smaller, App Store Connect will reject the build or show a blank icon.
+
+**Info.plist patching**: The workflow patches the generated `Info.plist` after
+`tauri ios init` to add document picker keys:
+- `UIFileSharingEnabled` — enables Files app access
+- `LSSupportsOpeningDocumentsInPlace` — enables "Open in Place"
+- `UISupportsDocumentBrowser` — enables document browser UI
+
+**Safe area insets**: Use `env(safe-area-inset-top)` directly in inline styles,
+not through CSS custom properties. Tauri's iOS webview doesn't propagate `env()`
+through `var()` references. Pattern:
+```css
+style="padding-top: calc(env(safe-area-inset-top, 0px) + 8px)"
+```
+
+**Folder picker**: `tauri-plugin-dialog` does NOT support `directory: true` on
+iOS. Use the file picker (`directory: false`) to let users select a `.org` file,
+then derive the vault folder from its parent path. This presents the native iOS
+picker UI (same as iA Writer, Obsidian, etc.).
+
+**Keyboard toolbar**: Use the `window.visualViewport` API to detect keyboard
+height and position toolbars above it:
+```javascript
+const vv = window.visualViewport;
+vv.addEventListener('resize', () => {
+  const keyboardHeight = window.innerHeight - vv.height - vv.offsetTop;
+  // Position toolbar at bottom: keyboardHeight px from bottom
+});
+```
+
 ## Troubleshooting
 
 | Error | Cause | Fix |
@@ -224,6 +258,11 @@ The `@tauri-apps/cli` devDependency provides the `tauri` binary for `npx tauri`.
 | `failed to read missing addr file` | Using raw `xcodebuild` instead of Tauri CLI | Always use `npx tauri ios build`, not `xcodebuild` directly |
 | `npm error could not determine executable to run` | `@tauri-apps/cli` not in devDependencies | Run `npm install --save-dev @tauri-apps/cli@^2` |
 | `Missing script: "tauri"` | No `tauri` script in package.json | Add `"tauri": "tauri"` to scripts |
+| `cp: ../ios-plugins/...: No such file or directory` | Swift plugin path wrong relative to gen/apple/ | Use absolute path or remove step if plugin not needed |
+| Blank icon in App Store Connect | `icon.png` smaller than 1024x1024 | Regenerate: `rsvg-convert -w 1024 -h 1024 app-image.svg -o icon.png` |
+| Folder picker doesn't open on iOS | `directory: true` not supported by dialog plugin on iOS | Use file picker with `directory: false`, derive folder from file path |
+| Header overlaps notch | Using `var(--safe-area-top)` CSS variable | Use `env(safe-area-inset-top, 0px)` directly in inline styles |
+| Toolbar hidden behind keyboard | Toolbar in document flow, not fixed | Use `visualViewport` API to detect keyboard and position:fixed the toolbar |
 
 ## Security Notes
 
