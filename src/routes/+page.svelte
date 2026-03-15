@@ -50,26 +50,29 @@
 		}
 	}
 
+	function isMobile(): boolean {
+		if (typeof navigator === 'undefined') return false;
+		return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+	}
+
 	async function handlePickFolder() {
+		if (isMobile()) {
+			// On mobile, directory picker doesn't work — use documents folder
+			await handleUseDocuments();
+			return;
+		}
 		try {
 			const { open } = await import('@tauri-apps/plugin-dialog');
 			const selected = await open({ directory: true, multiple: false });
 			if (selected) {
 				let path = selected as string;
-				// Strip file:// URL scheme if present (iOS returns URLs)
 				if (path.startsWith('file://')) {
 					path = decodeURIComponent(path.substring(7));
 				}
 				vaultPath = path;
 			}
 		} catch {
-			// Folder picker failed — try app documents directory (iOS fallback)
-			try {
-				const { documentDir } = await import('@tauri-apps/api/path');
-				vaultPath = await documentDir();
-			} catch {
-				// Browser mode
-			}
+			await handleUseDocuments();
 		}
 	}
 
@@ -78,7 +81,7 @@
 			const { documentDir } = await import('@tauri-apps/api/path');
 			vaultPath = await documentDir();
 		} catch {
-			error = 'Could not access documents directory.';
+			error = 'Could not access documents directory. Please enter the path manually.';
 		}
 	}
 </script>
