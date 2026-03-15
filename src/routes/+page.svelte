@@ -50,23 +50,6 @@
 		}
 	}
 
-	async function handleDemoMode() {
-		isLoading = true;
-		error = null;
-		try {
-			const syncResult = await openVault('/demo-vault');
-			const files = await listFiles();
-			const nodes = await listNodes();
-			vault.setVault('/demo-vault', files, nodes, syncResult);
-			// Don't save demo path to localStorage
-			window.location.href = '/vault';
-		} catch (e) {
-			error = String(e);
-		} finally {
-			isLoading = false;
-		}
-	}
-
 	async function handlePickFolder() {
 		try {
 			const { open } = await import('@tauri-apps/plugin-dialog');
@@ -151,21 +134,6 @@
 				{/if}
 			</div>
 
-			<!-- Divider -->
-			<div class="flex items-center gap-3">
-				<div class="h-px flex-1 bg-surface-200 dark:bg-surface-700"></div>
-				<span class="text-xs text-surface-700 dark:text-surface-300">or</span>
-				<div class="h-px flex-1 bg-surface-200 dark:bg-surface-700"></div>
-			</div>
-
-			<!-- Demo mode -->
-			<button
-				onclick={handleDemoMode}
-				disabled={isLoading}
-				class="w-full rounded-lg border border-surface-200 px-4 py-3 text-sm font-medium hover:bg-surface-100 dark:border-surface-700 dark:hover:bg-surface-800"
-			>
-				Try Demo Mode
-			</button>
 
 			<!-- Info -->
 			<p class="text-center text-xs text-surface-700 dark:text-surface-300">
