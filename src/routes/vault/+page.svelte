@@ -73,11 +73,11 @@
 <div class="flex h-full flex-col">
 	<!-- Header -->
 	<header
-		class="flex h-14 shrink-0 items-center gap-2 border-b border-surface-200 px-4 dark:border-surface-700"
-		style="padding-top: var(--safe-area-top)"
+		class="flex shrink-0 items-center gap-2 border-b border-surface-200 px-4 dark:border-surface-700"
+		style="padding-top: calc(env(safe-area-inset-top, 0px) + 8px); padding-bottom: 8px;"
 	>
-		<img src="/logo.svg" alt="" class="h-7 w-7 rounded" />
-		<h1 class="text-lg font-semibold">Mycelium</h1>
+		<img src="/logo.svg" alt="" class="h-7 w-7 shrink-0 rounded" />
+		<h1 class="shrink-0 text-lg font-semibold">Mycelium</h1>
 		<div class="flex-1"></div>
 		<button onclick={() => (showCreateModal = true)} class="rounded-lg p-2 hover:bg-surface-100 dark:hover:bg-surface-800" aria-label="New node">
 			<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>

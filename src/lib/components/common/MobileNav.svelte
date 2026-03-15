@@ -26,9 +26,10 @@
 </script>
 
 <nav
-	class="flex h-14 shrink-0 items-center justify-around border-t border-surface-200 bg-surface-0 dark:border-surface-700 dark:bg-surface-950 lg:hidden"
-	style="padding-bottom: var(--safe-area-bottom)"
+	class="shrink-0 border-t border-surface-200 bg-surface-0 dark:border-surface-700 dark:bg-surface-950 lg:hidden"
+	style="padding-bottom: env(safe-area-inset-bottom, 0px)"
 >
+	<div class="flex h-12 items-center justify-around">
 	{#each tabs as tab}
 		<a
 			href={tab.href}
@@ -45,4 +46,5 @@
 			<span>{tab.label}</span>
 		</a>
 	{/each}
+	</div>
 </nav>

@@ -39,7 +39,7 @@
 {#if editor.hasFile}
 	<div
 		class="flex h-12 shrink-0 items-center gap-0.5 overflow-x-auto border-t border-surface-200 bg-surface-50 px-2 dark:border-surface-700 dark:bg-surface-900"
-		style="-webkit-overflow-scrolling: touch;"
+		style="-webkit-overflow-scrolling: touch; padding-bottom: env(safe-area-inset-bottom, 0px);"
 	>
 		<!-- Link (primary action) -->
 		<button onclick={() => onLink?.()} title="Insert link (Cmd+K)" class="flex h-9 min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-semibold hover:bg-surface-200 dark:hover:bg-surface-700" style="color:#16a34a">Link</button>

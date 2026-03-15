@@ -55,27 +55,30 @@
 			const { open } = await import('@tauri-apps/plugin-dialog');
 			const selected = await open({ directory: true, multiple: false });
 			if (selected) {
-				// On iOS, the path may be a file:// URL — strip the scheme
 				let path = selected as string;
+				// Strip file:// URL scheme if present (iOS returns URLs)
 				if (path.startsWith('file://')) {
-					path = decodeURIComponent(path.replace('file://', ''));
-				}
-				// On iOS, if we got a temp Inbox path, show an error
-				if (path.includes('/tmp/') || path.includes('-Inbox')) {
-					error = 'On iOS, please use a folder from Files app (iCloud Drive, On My iPhone, or a synced folder). Temporary inbox paths cannot be used as a vault.';
-					return;
+					path = decodeURIComponent(path.substring(7));
 				}
 				vaultPath = path;
 			}
-		} catch (e) {
-			// Folder picker not available — try to get the app's documents directory
+		} catch {
+			// Folder picker failed — try app documents directory (iOS fallback)
 			try {
 				const { documentDir } = await import('@tauri-apps/api/path');
-				const docPath = await documentDir();
-				vaultPath = docPath;
+				vaultPath = await documentDir();
 			} catch {
-				// Browser mode or path API not available
+				// Browser mode
 			}
+		}
+	}
+
+	async function handleUseDocuments() {
+		try {
+			const { documentDir } = await import('@tauri-apps/api/path');
+			vaultPath = await documentDir();
+		} catch {
+			error = 'Could not access documents directory.';
 		}
 	}
 </script>
@@ -115,13 +118,22 @@
 					</button>
 				</div>
 
-				<button
-					onclick={handleOpenVault}
-					disabled={isLoading || !vaultPath.trim()}
-					class="w-full rounded-lg bg-mycelium-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-mycelium-700 disabled:opacity-50"
-				>
-					{isLoading ? 'Opening vault...' : 'Open Vault'}
-				</button>
+				<div class="flex gap-2">
+					<button
+						onclick={handleOpenVault}
+						disabled={isLoading || !vaultPath.trim()}
+						class="flex-1 rounded-lg bg-mycelium-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-mycelium-700 disabled:opacity-50"
+					>
+						{isLoading ? 'Opening...' : 'Open Vault'}
+					</button>
+					<button
+						onclick={handleUseDocuments}
+						class="rounded-lg border border-mycelium-200 px-4 py-3 text-sm font-medium text-mycelium-700 hover:bg-mycelium-50 dark:border-mycelium-800 dark:text-mycelium-300 dark:hover:bg-mycelium-950"
+						title="Use app's documents folder (iOS)"
+					>
+						Documents
+					</button>
+				</div>
 
 				{#if error}
 					<p class="rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-950 dark:text-red-400">

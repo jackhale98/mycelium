@@ -29,4 +29,20 @@
 :root {
 	--safe-area-top: env(safe-area-inset-top, 0px);
 	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
+	--safe-area-left: env(safe-area-inset-left, 0px);
+	--safe-area-right: env(safe-area-inset-right, 0px);
+}
+
+/* Ensure the app fills the full viewport including behind notch/home indicator */
+html, body {
+	height: 100%;
+	overflow: hidden;
+	-webkit-text-size-adjust: 100%;
+}
+
+/* iOS keyboard: keep toolbar visible above keyboard */
+@supports (padding-bottom: env(keyboard-inset-height, 0px)) {
+	.keyboard-aware {
+		padding-bottom: env(keyboard-inset-height, 0px);
+	}
 }
