@@ -70,9 +70,30 @@
 	async function handlePickFolder() {
 		try {
 			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({ directory: true, multiple: false });
-			if (selected) {
-				vaultPath = selected as string;
+
+			// Try directory picker first (works on desktop)
+			try {
+				const selected = await open({ directory: true, multiple: false });
+				if (selected) {
+					vaultPath = selected as string;
+					return;
+				}
+			} catch {
+				// Directory picker not available (iOS) — fall through
+			}
+
+			// Fallback for iOS: pick any .org file, derive vault path from it
+			const file = await open({
+				multiple: false,
+				filters: [{ name: 'Org files', extensions: ['org'] }],
+			});
+			if (file) {
+				// Get the parent directory of the selected file
+				const filePath = file as string;
+				const lastSlash = filePath.lastIndexOf('/');
+				if (lastSlash > 0) {
+					vaultPath = filePath.substring(0, lastSlash);
+				}
 			}
 		} catch {
 			// Dialog not available (browser mode)

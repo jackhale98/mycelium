@@ -1,0 +1,9 @@
+<!-- Add these keys to the generated Info.plist for iOS file access -->
+<!-- These enable the document picker to access folders and files -->
+
+<key>UIFileSharingEnabled</key>
+<true/>
+<key>LSSupportsOpeningDocumentsInPlace</key>
+<true/>
+<key>UISupportsDocumentBrowser</key>
+<true/>

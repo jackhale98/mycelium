@@ -53,6 +53,21 @@ jobs:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri ios init
 
+      - name: Enable iOS document picker support
+        run: |
+          PLIST="src-tauri/gen/apple/mycelium_iOS/Info.plist"
+          if [ -f "$PLIST" ]; then
+            # Add keys before closing </dict>
+            sed -i '' '/<\/dict>/i\
+            <key>UIFileSharingEnabled</key>\
+            <true/>\
+            <key>LSSupportsOpeningDocumentsInPlace</key>\
+            <true/>\
+            <key>UISupportsDocumentBrowser</key>\
+            <true/>' "$PLIST"
+            echo "Patched Info.plist with document picker keys"
+          fi
+
       - name: Prepare App Store Connect API key
         env:
           API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
