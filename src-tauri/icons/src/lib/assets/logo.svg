@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2618"/>
+      <stop offset="100%" stop-color="#111e10"/>
+    </linearGradient>
+    <linearGradient id="w" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#c4882a"/>
+      <stop offset="40%" stop-color="#e0b050"/>
+      <stop offset="100%" stop-color="#f4d58d"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#c4882a" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#e8b84b" stop-opacity="0.06"/>
+    </linearGradient>
+    <filter id="g">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="lg">
+      <feGaussianBlur stdDeviation="1.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="a"><feGaussianBlur stdDeviation="22"/></filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
+  <ellipse cx="256" cy="220" rx="140" ry="120" fill="#f4d58d" opacity="0.025" filter="url(#a)"/>
+
+  <!--
+    MUSHROOM STRUCTURE - coordinate map, no crossings.
+
+    CAP: dome shape, center roughly at 256,185
+    Cap outline is an elliptical dome from ~115,245 to ~397,245
+    with apex around 256,105
+
+    STEM: from 256,245 down to 256,340
+    Slightly tapered, organic lean
+
+    GILL LINES: radiate from stem-top (256,245) upward into cap dome
+
+    MYCELIUM ROOTS: spread from stem base (256,340) downward
+
+    CAP SURFACE NODES (spores): scattered across cap dome
+    S1: 175,165   S2: 210,135   S3: 260,118
+    S4: 310,130   S5: 350,158   S6: 145,195
+    S7: 200,178   S8: 280,170   S9: 335,185
+    S10: 380,200  S11: 230,148  S12: 290,145
+    S13: 160,215  S14: 215,210  S15: 305,205
+    S16: 360,218  S17: 256,155  S18: 185,140
+    S19: 330,148  S20: 245,195
+
+    MYCELIUM NODES:
+    M1: 256,340 (stem base)
+    M2: 210,365  M3: 310,362
+    M4: 165,385  M5: 345,380
+    M6: 128,400  M7: 380,395
+    M8: 250,380  M9: 275,375
+    M10: 190,410  M11: 330,405
+    M12: 100,415  M13: 405,412
+    M14: 155,428  M15: 360,425
+    M16: 220,430  M17: 295,428
+    M18: 112,440  M19: 390,438
+    M20: 175,450  M21: 340,448
+  -->
+
+  <!-- CAP — smooth dome outline -->
+
+  <!-- Cap shape implied by nodes and network only -->
+
+  <!-- STEM — single organic path, slight curve -->
+
+<path d="M256,248 C254,270 253,295 254,315 C255,328 256,335 256,340"
+stroke="url(#w)" stroke-width="3.5" fill="none" stroke-linecap="round" filter="url(#g)"/>
+
+  <!-- CAP SURFACE NETWORK — organic veins, centered around x=256 -->
+
+  <!--
+    Rebalanced node positions:
+    Top:     256,118
+    Upper:   208,135  304,132  182,142  326,145
+    Mid:     170,168  340,165  228,150  284,148
+    Inner:   198,180  314,178  256,155  272,170  238,172
+    Lower:   140,198  372,198  155,218  358,215
+    Bottom:  212,212  300,208  242,197
+  -->
+
+  <g stroke="url(#w)" fill="none" stroke-linecap="round" opacity="0.45">
+    <!-- Outer rim connections -->
+    <path d="M170,168 C185,155 196,145 208,135" stroke-width="1.5"/>
+    <path d="M208,135 C228,128 242,122 256,118" stroke-width="1.5"/>
+    <path d="M256,118 C270,122 288,128 304,132" stroke-width="1.5"/>
+    <path d="M304,132 C318,145 330,155 340,165" stroke-width="1.5"/>
+    <path d="M170,168 C158,180 148,190 140,198" stroke-width="1.5"/>
+    <path d="M340,165 C352,178 362,190 372,198" stroke-width="1.5"/>
+    <path d="M140,198 C145,210 150,216 155,218" stroke-width="1.2"/>
+    <path d="M372,198 C368,210 363,215 358,215" stroke-width="1.2"/>
+
+```
+<!-- Inner web -->
+<path d="M170,168 C182,175 192,178 198,180" stroke-width="1.2"/>
+<path d="M198,180 C218,188 232,194 242,197" stroke-width="1.2"/>
+<path d="M340,165 C330,174 322,178 314,178" stroke-width="1.2"/>
+<path d="M314,178 C302,188 300,200 300,208" stroke-width="1.2"/>
+<path d="M208,135 C215,143 222,148 228,150" stroke-width="1.2"/>
+<path d="M304,132 C298,140 292,145 284,148" stroke-width="1.2"/>
+<path d="M228,150 C240,154 248,155 256,155" stroke-width="1"/>
+<path d="M284,148 C276,153 266,155 256,155" stroke-width="1"/>
+<path d="M182,142 C178,152 174,162 170,168" stroke-width="1.2"/>
+<path d="M326,145 C332,152 336,160 340,165" stroke-width="1.2"/>
+<path d="M256,155 C262,165 268,168 272,170" stroke-width="1"/>
+<path d="M256,155 C248,165 242,170 238,172" stroke-width="1"/>
+<path d="M212,212 C225,208 236,200 242,197" stroke-width="1"/>
+<path d="M300,208 C290,200 280,190 272,170" stroke-width="1"/>
+<path d="M155,218 C175,216 195,214 212,212" stroke-width="1"/>
+<path d="M300,208 C320,212 340,214 358,215" stroke-width="1"/>
+```
+
+  </g>
+
+  <!-- MYCELIUM ROOTS — spreading network below stem -->
+
+  <g stroke="url(#w)" fill="none" stroke-linecap="round">
+    <!-- Primary roots from stem base -->
+    <path d="M256,340 C238,350 224,358 210,365" stroke-width="3" opacity="0.4" filter="url(#g)"/>
+    <path d="M256,340 C275,348 292,355 310,362" stroke-width="3" opacity="0.4" filter="url(#g)"/>
+    <path d="M256,340 C252,355 250,368 250,380" stroke-width="2.5" opacity="0.35"/>
+    <path d="M256,340 C260,358 268,368 275,375" stroke-width="2.5" opacity="0.35"/>
+
+```
+<!-- Secondary spread -->
+<path d="M210,365 C192,375 178,380 165,385" stroke-width="2.2" opacity="0.32"/>
+<path d="M310,362 C325,370 335,375 345,380" stroke-width="2.2" opacity="0.32"/>
+<path d="M210,365 C202,385 196,400 190,410" stroke-width="2" opacity="0.28"/>
+<path d="M310,362 C318,380 324,395 330,405" stroke-width="2" opacity="0.28"/>
+
+<!-- Tertiary spread -->
+<path d="M165,385 C150,392 140,396 128,400" stroke-width="1.8" opacity="0.25"/>
+<path d="M345,380 C358,388 370,392 380,395" stroke-width="1.8" opacity="0.25"/>
+<path d="M128,400 C118,408 110,412 100,415" stroke-width="1.4" opacity="0.2"/>
+<path d="M380,395 C390,402 398,408 405,412" stroke-width="1.4" opacity="0.2"/>
+<path d="M165,385 C160,405 156,418 155,428" stroke-width="1.5" opacity="0.22"/>
+<path d="M345,380 C352,400 356,418 360,425" stroke-width="1.5" opacity="0.22"/>
+
+<!-- Fine tips -->
+<path d="M250,380 C238,400 228,418 220,430" stroke-width="1.5" opacity="0.2"/>
+<path d="M275,375 C282,395 290,415 295,428" stroke-width="1.5" opacity="0.2"/>
+<path d="M190,410 C182,425 178,440 175,450" stroke-width="1.2" opacity="0.18"/>
+<path d="M330,405 C335,422 338,438 340,448" stroke-width="1.2" opacity="0.18"/>
+<path d="M100,415 C108,428 110,435 112,440" stroke-width="1" opacity="0.15"/>
+<path d="M405,412 C398,426 394,434 390,438" stroke-width="1" opacity="0.15"/>
+```
+
+  </g>
+
+  <!-- ═══════ NODES ═══════ -->
+
+  <!-- Stem junction nodes -->
+
+  <g fill="url(#w)" filter="url(#g)">
+    <circle cx="256" cy="248" r="5"/>
+    <circle cx="256" cy="340" r="5"/>
+  </g>
+
+  <!-- Cap surface nodes — varied warm colors, centered -->
+
+  <g filter="url(#lg)">
+    <circle cx="256" cy="118" r="4" fill="#c8d478" opacity="0.75"/>
+    <circle cx="256" cy="155" r="4" fill="#f4d58d" opacity="0.75"/>
+    <circle cx="208" cy="135" r="3.8" fill="#e0a040" opacity="0.7"/>
+    <circle cx="304" cy="132" r="3.8" fill="#d4952a" opacity="0.7"/>
+    <circle cx="170" cy="168" r="3.8" fill="#e8c35a" opacity="0.72"/>
+    <circle cx="340" cy="165" r="3.8" fill="#a8c462" opacity="0.7"/>
+    <circle cx="140" cy="198" r="3.2" fill="#d4782e" opacity="0.65"/>
+    <circle cx="372" cy="198" r="3.2" fill="#f0c858" opacity="0.65"/>
+    <circle cx="198" cy="180" r="3.2" fill="#b8cc68" opacity="0.7"/>
+    <circle cx="314" cy="178" r="3.2" fill="#d89038" opacity="0.7"/>
+    <circle cx="272" cy="170" r="3" fill="#e8c35a" opacity="0.68"/>
+    <circle cx="238" cy="172" r="3" fill="#a0b858" opacity="0.68"/>
+    <circle cx="228" cy="150" r="3" fill="#cc6b3a" opacity="0.68"/>
+    <circle cx="284" cy="148" r="3" fill="#c4d478" opacity="0.68"/>
+    <circle cx="182" cy="142" r="3" fill="#a0b858" opacity="0.62"/>
+    <circle cx="326" cy="145" r="3" fill="#e0a040" opacity="0.62"/>
+    <circle cx="155" cy="218" r="3" fill="#d4952a" opacity="0.58"/>
+    <circle cx="358" cy="215" r="3" fill="#a8c462" opacity="0.58"/>
+    <circle cx="212" cy="212" r="3" fill="#c8a850" opacity="0.58"/>
+    <circle cx="300" cy="208" r="3" fill="#d4782e" opacity="0.58"/>
+    <circle cx="242" cy="197" r="3" fill="#b8cc68" opacity="0.65"/>
+  </g>
+
+  <!-- Mycelium root nodes -->
+
+  <g fill="url(#w)" opacity="0.4">
+    <circle cx="210" cy="365" r="3.8"/>
+    <circle cx="310" cy="362" r="3.8"/>
+    <circle cx="250" cy="380" r="3.2"/>
+    <circle cx="275" cy="375" r="3.2"/>
+  </g>
+  <g fill="url(#w)" opacity="0.32">
+    <circle cx="165" cy="385" r="3.2"/>
+    <circle cx="345" cy="380" r="3.2"/>
+    <circle cx="190" cy="410" r="3"/>
+    <circle cx="330" cy="405" r="3"/>
+    <circle cx="128" cy="400" r="2.8"/>
+    <circle cx="380" cy="395" r="2.8"/>
+  </g>
+  <g fill="url(#w)" opacity="0.22">
+    <circle cx="100" cy="415" r="2.5"/>
+    <circle cx="405" cy="412" r="2.5"/>
+    <circle cx="155" cy="428" r="2.5"/>
+    <circle cx="360" cy="425" r="2.5"/>
+    <circle cx="220" cy="430" r="2.5"/>
+    <circle cx="295" cy="428" r="2.5"/>
+    <circle cx="112" cy="440" r="2.2"/>
+    <circle cx="390" cy="438" r="2.2"/>
+    <circle cx="175" cy="450" r="2.2"/>
+    <circle cx="340" cy="448" r="2.2"/>
+  </g>
+</svg>

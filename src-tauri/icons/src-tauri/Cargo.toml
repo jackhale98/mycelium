@@ -1,0 +1,31 @@
+[package]
+name = "mycelium"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Open-source Org Roam mobile knowledge base"
+
+[lib]
+name = "mycelium_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "mycelium"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+org-parser = { path = "../crates/org-parser" }
+db = { path = "../crates/db" }
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+rusqlite = { workspace = true }
+notify = "7"
+regex-lite = "0.1"

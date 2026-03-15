@@ -1,0 +1,14 @@
+[package]
+name = "org-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Round-trip-fidelity Org mode parser"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = "1"

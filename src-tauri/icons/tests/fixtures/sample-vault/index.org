@@ -1,0 +1,12 @@
+:PROPERTIES:
+:ID: 20240115-index
+:END:
+#+TITLE: My Knowledge Base
+#+FILETAGS: :index:
+
+This is the main index of my knowledge base.
+
+* Topics
+- [[id:20240115-rust][Rust Programming]]
+- [[id:20240115-emacs][Emacs & Org Mode]]
+- [[id:20240115-projects][Projects]]
