@@ -46,8 +46,8 @@
 
 <div class="flex h-full flex-col">
 	<header
-		class="flex h-14 shrink-0 items-center gap-2 border-b border-surface-200 px-4 dark:border-surface-700"
-		style="padding-top: env(safe-area-inset-top, 0px)"
+		class="flex shrink-0 items-center gap-2 border-b border-surface-200 px-4 dark:border-surface-700"
+		style="padding-top: calc(env(safe-area-inset-top, 0px) + 8px); padding-bottom: 8px; min-height: 48px;"
 	>
 		<button
 			onclick={() => navigation.navigateToVault()}

@@ -39,21 +39,45 @@
 	let keyboardOffset = $state(0);
 
 	onMount(() => {
-		// Track keyboard height via visualViewport API (works on iOS Safari + Tauri)
+		// Track keyboard on iOS using multiple strategies
 		const vv = window.visualViewport;
+
+		const update = () => {
+			if (vv) {
+				const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+				keyboardOffset = offset > 50 ? offset : 0; // threshold to avoid false positives
+			}
+		};
+
 		if (vv) {
-			const update = () => {
-				const windowHeight = window.innerHeight;
-				const viewportHeight = vv.height;
-				keyboardOffset = Math.max(0, windowHeight - viewportHeight - vv.offsetTop);
-			};
 			vv.addEventListener('resize', update);
 			vv.addEventListener('scroll', update);
-			return () => {
+		}
+
+		// Also detect via focusin/focusout on editable elements
+		const onFocusIn = (e: FocusEvent) => {
+			const tag = (e.target as HTMLElement)?.tagName;
+			if (tag === 'TEXTAREA' || tag === 'INPUT' || (e.target as HTMLElement)?.isContentEditable) {
+				// Small delay for keyboard to animate open
+				setTimeout(update, 300);
+				setTimeout(update, 600);
+			}
+		};
+		const onFocusOut = () => {
+			setTimeout(() => { keyboardOffset = 0; }, 100);
+		};
+
+		document.addEventListener('focusin', onFocusIn);
+		document.addEventListener('focusout', onFocusOut);
+
+		return () => {
+			if (vv) {
 				vv.removeEventListener('resize', update);
 				vv.removeEventListener('scroll', update);
-			};
-		}
+			}
+			document.removeEventListener('focusin', onFocusIn);
+			document.removeEventListener('focusout', onFocusOut);
+		};
 	});
 </script>
 

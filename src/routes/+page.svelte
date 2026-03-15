@@ -42,6 +42,14 @@
 			const syncResult = await openVault(vaultPath.trim());
 			const files = await listFiles();
 			const nodes = await listNodes();
+
+			// Check if we actually indexed any files
+			if (syncResult.total_files === 0 && isMobile()) {
+				error = 'No .org files found. On iOS, the app may not have access to this folder. Try placing your vault in the Mycelium Documents folder (accessible via Files app → On My iPhone → Mycelium).';
+				isLoading = false;
+				return;
+			}
+
 			vault.setVault(vaultPath.trim(), files, nodes, syncResult);
 			localStorage.setItem('mycelium-vault-path', vaultPath.trim());
 			window.location.href = '/vault';
@@ -157,7 +165,8 @@
 
 			<!-- Info -->
 			<p class="text-center text-xs text-surface-700 dark:text-surface-300">
-				On mobile, tap Browse and select any .org file in your vault — the app will use its folder.
+				On iOS, place your org vault in Files → On My iPhone → Mycelium, then tap Browse to select a file from it.
+				Sync with iCloud, Syncthing, or Working Copy.
 			</p>
 		</div>
 	</div>
