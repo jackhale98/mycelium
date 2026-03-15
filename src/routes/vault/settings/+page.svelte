@@ -60,6 +60,18 @@
 	}
 
 	function handleCloseVault() {
+		localStorage.removeItem('mycelium-vault-path');
+		vault.close();
+		navigation.navigateHome();
+	}
+
+	function handleForgetVault() {
+		localStorage.removeItem('mycelium-vault-path');
+		alert('Vault path cleared. You will be asked to choose a vault next time you open the app.');
+	}
+
+	function handleChangeVault() {
+		localStorage.removeItem('mycelium-vault-path');
 		vault.close();
 		navigation.navigateHome();
 	}
@@ -126,19 +138,27 @@
 							{isSyncing ? 'Syncing...' : 'Re-sync Vault'}
 						</button>
 						<button
-							onclick={handleCloseVault}
-							class="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+							onclick={handleRebuild}
+							disabled={isSyncing || isRebuilding}
+							class="flex-1 rounded-lg border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950"
 						>
-							Close Vault
+							{isRebuilding ? 'Rebuilding...' : 'Rebuild DB'}
 						</button>
 					</div>
-					<button
-						onclick={handleRebuild}
-						disabled={isSyncing || isRebuilding}
-						class="w-full rounded-lg border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950"
-					>
-						{isRebuilding ? 'Rebuilding...' : 'Rebuild Database'}
-					</button>
+					<div class="flex gap-2">
+						<button
+							onclick={handleChangeVault}
+							class="flex-1 rounded-lg border border-surface-200 px-3 py-2 text-sm font-medium hover:bg-surface-100 dark:border-surface-700 dark:hover:bg-surface-800"
+						>
+							Change Vault
+						</button>
+						<button
+							onclick={handleCloseVault}
+							class="flex-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+						>
+							Close & Forget
+						</button>
+					</div>
 					<p class="text-[11px] text-surface-700 dark:text-surface-300">
 						Re-sync checks for changes. Rebuild drops all indexed data and re-indexes every file from scratch.
 					</p>
