@@ -257,24 +257,9 @@
 </div>
 
 {#snippet taskRow(item: NodeRecord)}
-	<div class="relative overflow-hidden rounded-lg" style="touch-action: pan-y">
-		<!-- Swipe actions (revealed by swiping left) -->
-		<div class="absolute right-0 top-0 bottom-0 flex items-stretch">
-			<label class="flex w-20 cursor-pointer flex-col items-center justify-center text-[10px] font-medium text-white" style="background:#dc2626">
-				DL
-				<input type="date" value={extractDate(item.deadline)} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} class="absolute opacity-0 w-0 h-0" />
-				<span class="text-[9px] opacity-80">{extractDate(item.deadline) || 'set'}</span>
-			</label>
-			<label class="flex w-20 cursor-pointer flex-col items-center justify-center text-[10px] font-medium text-white" style="background:#2563eb">
-				SC
-				<input type="date" value={extractDate(item.scheduled)} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} class="absolute opacity-0 w-0 h-0" />
-				<span class="text-[9px] opacity-80">{extractDate(item.scheduled) || 'set'}</span>
-			</label>
-		</div>
-
-		<!-- Main row (slides over the actions) -->
-		<div class="relative flex items-center gap-2 bg-surface-0 px-1 py-2 dark:bg-surface-950 {changingId === item.id ? 'opacity-50' : ''}" style="transition: transform 0.2s ease">
-			<!-- TODO state dropdown -->
+	<div class="py-2 {changingId === item.id ? 'opacity-50' : ''}">
+		<!-- Row 1: state, title, priority -->
+		<div class="flex items-center gap-2">
 			<select
 				value={item.todo ?? ''}
 				onchange={(e) => setState(item, (e.target as HTMLSelectElement).value || null)}
@@ -287,18 +272,10 @@
 				{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
 			</select>
 
-			<!-- Content -->
 			<button onclick={() => navigation.navigateToNode(item.id)} class="min-w-0 flex-1 text-left">
 				<div class="truncate text-sm {isDone(item) ? 'line-through opacity-60' : 'font-medium'}">{item.title ?? 'Untitled'}</div>
-				{#if item.deadline || item.scheduled}
-					<div class="flex gap-2 text-[10px]">
-						{#if item.deadline}<span style="color:{isOverdue(item) ? '#dc2626' : '#6b7280'}">DL: {extractDate(item.deadline)}</span>{/if}
-						{#if item.scheduled}<span style="color:#2563eb">SC: {extractDate(item.scheduled)}</span>{/if}
-					</div>
-				{/if}
 			</button>
 
-			<!-- Priority dropdown -->
 			<select
 				value={item.priority ?? ''}
 				onchange={(e) => setPriority(item, (e.target as HTMLSelectElement).value || null)}
@@ -309,6 +286,30 @@
 				<option value="">—</option>
 				{#each orgConfig.priorities as p}<option value={p}>#{p}</option>{/each}
 			</select>
+		</div>
+
+		<!-- Row 2: compact date editors -->
+		<div class="mt-1 flex items-center gap-3 pl-1 text-[11px]">
+			<label class="flex items-center gap-1 cursor-pointer">
+				<span class="font-semibold" style="color:#dc2626">DL</span>
+				<input
+					type="date"
+					value={extractDate(item.deadline)}
+					onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)}
+					class="rounded border px-1.5 py-0.5 text-[11px]"
+					style="border-color:#e2e8f0;color:{isOverdue(item) ? '#dc2626' : '#374151'};background:transparent;max-width:130px"
+				/>
+			</label>
+			<label class="flex items-center gap-1 cursor-pointer">
+				<span class="font-semibold" style="color:#2563eb">SC</span>
+				<input
+					type="date"
+					value={extractDate(item.scheduled)}
+					onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)}
+					class="rounded border px-1.5 py-0.5 text-[11px]"
+					style="border-color:#e2e8f0;color:#374151;background:transparent;max-width:130px"
+				/>
+			</label>
 		</div>
 	</div>
 {/snippet}

@@ -265,10 +265,12 @@ function buildNodes(): NodeRecord[] {
 					if (prioMatch) { priority = prioMatch[1]; hlText = hlText.substring(prioMatch[0].length); }
 					title = hlText.replace(/\s+:[\w:]+:\s*$/, '').trim();
 				}
-				// Check for SCHEDULED/DEADLINE on lines after the headline
-				const after = content.substring(pos);
-				const afterLines = after.split('\n').slice(0, 5);
-				for (const al of afterLines) {
+				// Check for SCHEDULED/DEADLINE in the region around the headline
+				// (between headline and a few lines after :END:)
+				const beforeLines = content.substring(0, pos).split('\n');
+				const afterPos = content.substring(pos);
+				const nearbyLines = [...beforeLines.slice(-5), ...afterPos.split('\n').slice(0, 5)];
+				for (const al of nearbyLines) {
 					const dlMatch = al.match(/DEADLINE:\s*<([^>]+)>/);
 					if (dlMatch) deadline = `<${dlMatch[1]}>`;
 					const scMatch = al.match(/SCHEDULED:\s*<([^>]+)>/);
