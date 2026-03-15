@@ -35,8 +35,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
-        run: sdkmanager --install "ndk;27.0.12077973"
+      - name: Find and set NDK
+        run: |
+          NDK_DIR=$(ls -d $ANDROID_HOME/ndk/*/ 2>/dev/null | sort -V | tail -1)
+          echo "NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
+          echo "Using NDK: $NDK_DIR"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -49,16 +52,12 @@ jobs:
 
       - name: Initialize Android project
         run: npx tauri android init
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
 
       - name: Build frontend
         run: npm run build
 
       - name: Build Android APK (arm64)
         run: npx tauri android build --target aarch64 --debug
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
           CARGO_PROFILE_DEV_OPT_LEVEL: s
           CARGO_PROFILE_DEV_LTO: "true"
           CARGO_PROFILE_DEV_CODEGEN_UNITS: "1"

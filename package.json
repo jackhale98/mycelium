@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "lint": "prettier --check . && eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",
