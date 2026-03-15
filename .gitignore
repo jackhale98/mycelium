@@ -1,0 +1,44 @@
+# Rust
+/target/
+Cargo.lock
+
+# Node
+node_modules/
+package-lock.json
+
+# SvelteKit
+/.svelte-kit/
+/build/
+
+# Tauri
+/src-tauri/target/
+/src-tauri/gen/
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.mycelium.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.*
+
+# Test artifacts
+/tests/fixtures/sample-vault/.mycelium.db
+
+# Debug/temp
+/src/routes/test-render/
+/src/routes/demo/

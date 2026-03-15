@@ -1,0 +1,47 @@
+:PROPERTIES:
+:ID: 20240115-projects
+:END:
+#+TITLE: Projects
+#+FILETAGS: :projects:
+
+* TODO Mycelium :app:rust:
+:PROPERTIES:
+:ID: 20240115-mycelium
+:END:
+DEADLINE: <2024-06-01 Sat>
+
+An open-source Org Roam mobile app.
+Uses [[id:20240115-rust][Rust]] for the backend.
+
+- [X] Design architecture
+- [X] Set up project structure
+- [ ] Implement parser
+- [ ] Build UI
+- [ ] Release v0.1.0
+
+** DONE Design Architecture
+:PROPERTIES:
+:ID: 20240115-mycelium-arch
+:END:
+CLOSED: [2024-01-10 Wed 15:30]
+
+Decided on Tauri + Svelte + Rust stack.
+
+* NEXT Research Paper :research:
+:PROPERTIES:
+:ID: 20240115-paper
+:ROAM_REFS: "https://arxiv.org/example"
+:END:
+
+Write a paper on knowledge management systems.
+
+* Daily Notes
+
+** 2024-01-15
+:PROPERTIES:
+:ID: 20240115-daily
+:END:
+
+- Met with team about [[id:20240115-mycelium][Mycelium]] progress
+- Read about [[id:20240115-ownership][Rust ownership]]
+- Updated [[id:20240115-org-roam][Org Roam]] configuration

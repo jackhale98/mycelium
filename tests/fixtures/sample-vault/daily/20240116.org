@@ -1,0 +1,13 @@
+:PROPERTIES:
+:ID: 20240116-daily
+:END:
+#+TITLE: 2024-01-16
+
+* Tasks
+- [ ] Review [[id:20240115-mycelium][Mycelium]] PR
+- [X] Update [[id:20240115-rust][Rust]] notes
+- [ ] Read [[id:20240115-paper][research paper]]
+
+* Notes
+Explored the [[id:20240115-borrowing][borrowing]] system more.
+Also looked at [[id:20240115-errors][error handling]] patterns.

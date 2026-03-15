@@ -1,0 +1,134 @@
+<script lang="ts">
+	// removed goto import
+	import { vault } from '$lib/stores/vault.svelte';
+	import { openVault, listFiles, listNodes } from '$lib/tauri/commands';
+
+	let vaultPath = $state('');
+	let isLoading = $state(false);
+	let error = $state<string | null>(null);
+
+	async function handleOpenVault() {
+		if (!vaultPath.trim()) return;
+
+		isLoading = true;
+		error = null;
+
+		try {
+			const syncResult = await openVault(vaultPath.trim());
+			const files = await listFiles();
+			const nodes = await listNodes();
+			vault.setVault(vaultPath.trim(), files, nodes, syncResult);
+			window.location.href = '/vault';
+		} catch (e) {
+			error = String(e);
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	async function handleDemoMode() {
+		isLoading = true;
+		error = null;
+		try {
+			console.log('[demo] Starting demo mode...');
+			const syncResult = await openVault('/demo-vault');
+			console.log('[demo] openVault result:', syncResult);
+			const files = await listFiles();
+			console.log('[demo] files:', files.length);
+			const nodes = await listNodes();
+			console.log('[demo] nodes:', nodes.length);
+			vault.setVault('/demo-vault', files, nodes, syncResult);
+			console.log('[demo] vault set, navigating...');
+			window.location.href = '/vault';
+			console.log('[demo] navigation complete');
+		} catch (e) {
+			console.error('[demo] Error:', e);
+			error = String(e);
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	async function handlePickFolder() {
+		try {
+			const { open } = await import('@tauri-apps/plugin-dialog');
+			const selected = await open({ directory: true, multiple: false });
+			if (selected) {
+				vaultPath = selected as string;
+			}
+		} catch {
+			// Dialog not available (browser mode)
+		}
+	}
+</script>
+
+<div class="flex h-full flex-col items-center justify-center p-6">
+	<div class="w-full max-w-md space-y-8">
+		<!-- Logo & Title -->
+		<div class="text-center">
+			<div
+				class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-mycelium-600 text-3xl font-bold text-white"
+			>
+				M
+			</div>
+			<h1 class="text-3xl font-bold tracking-tight">Mycelium</h1>
+			<p class="mt-2 text-surface-700 dark:text-surface-300">
+				Open-source Org Roam knowledge base
+			</p>
+		</div>
+
+		<!-- Vault Picker -->
+		<div class="space-y-4">
+			<div class="flex gap-2">
+				<input
+					type="text"
+					bind:value={vaultPath}
+					placeholder="Path to your org-roam vault..."
+					class="flex-1 rounded-lg border border-surface-200 bg-surface-50 px-4 py-3 text-sm focus:border-mycelium-500 focus:outline-none focus:ring-2 focus:ring-mycelium-500/20 dark:border-surface-700 dark:bg-surface-900"
+					onkeydown={(e) => e.key === 'Enter' && handleOpenVault()}
+				/>
+				<button
+					onclick={handlePickFolder}
+					class="rounded-lg border border-surface-200 px-4 py-3 text-sm font-medium hover:bg-surface-100 dark:border-surface-700 dark:hover:bg-surface-800"
+				>
+					Browse
+				</button>
+			</div>
+
+			<button
+				onclick={handleOpenVault}
+				disabled={isLoading || !vaultPath.trim()}
+				class="w-full rounded-lg bg-mycelium-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-mycelium-700 disabled:opacity-50"
+			>
+				{isLoading ? 'Opening vault...' : 'Open Vault'}
+			</button>
+
+			{#if error}
+				<p class="rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-950 dark:text-red-400">
+					{error}
+				</p>
+			{/if}
+		</div>
+
+		<!-- Divider -->
+		<div class="flex items-center gap-3">
+			<div class="h-px flex-1 bg-surface-200 dark:bg-surface-700"></div>
+			<span class="text-xs text-surface-700 dark:text-surface-300">or</span>
+			<div class="h-px flex-1 bg-surface-200 dark:bg-surface-700"></div>
+		</div>
+
+		<!-- Demo mode -->
+		<button
+			onclick={handleDemoMode}
+			disabled={isLoading}
+			class="w-full rounded-lg border border-surface-200 px-4 py-3 text-sm font-medium hover:bg-surface-100 dark:border-surface-700 dark:hover:bg-surface-800"
+		>
+			Try Demo Mode
+		</button>
+
+		<!-- Info -->
+		<p class="text-center text-xs text-surface-700 dark:text-surface-300">
+			Select a directory containing your .org files, or try demo mode to explore the UI.
+		</p>
+	</div>
+</div>

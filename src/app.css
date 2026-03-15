@@ -1,0 +1,32 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--color-mycelium-50: #f0fdf4;
+	--color-mycelium-100: #dcfce7;
+	--color-mycelium-200: #bbf7d0;
+	--color-mycelium-300: #86efac;
+	--color-mycelium-400: #4ade80;
+	--color-mycelium-500: #22c55e;
+	--color-mycelium-600: #16a34a;
+	--color-mycelium-700: #15803d;
+	--color-mycelium-800: #166534;
+	--color-mycelium-900: #14532d;
+	--color-mycelium-950: #052e16;
+
+	--color-surface-0: #ffffff;
+	--color-surface-50: #f8fafc;
+	--color-surface-100: #f1f5f9;
+	--color-surface-200: #e2e8f0;
+	--color-surface-300: #cbd5e1;
+	--color-surface-700: #334155;
+	--color-surface-800: #1e293b;
+	--color-surface-900: #0f172a;
+	--color-surface-950: #020617;
+}
+
+:root {
+	--safe-area-top: env(safe-area-inset-top, 0px);
+	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
