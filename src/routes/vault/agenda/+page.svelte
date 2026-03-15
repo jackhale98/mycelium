@@ -31,6 +31,12 @@
 		return m ? m[1] : '';
 	}
 
+	function extractTime(raw: string | null): string {
+		if (!raw) return '';
+		const m = raw.match(/(\d{1,2}:\d{2})/);
+		return m ? m[1] : '';
+	}
+
 	const today = fmtDate(new Date());
 
 	function isOverdue(n: NodeRecord): boolean {
@@ -57,11 +63,21 @@
 		return out;
 	}
 
-	function itemsForDate(date: string): NodeRecord[] {
-		return items.filter(n => {
-			if (isDone(n)) return false;
-			return extractDate(n.deadline) === date || extractDate(n.scheduled) === date;
+	function itemsForDate(date: string): { node: NodeRecord; reason: 'deadline' | 'scheduled' }[] {
+		const result: { node: NodeRecord; reason: 'deadline' | 'scheduled'; time: string }[] = [];
+		for (const n of items) {
+			if (isDone(n)) continue;
+			if (extractDate(n.deadline) === date) result.push({ node: n, reason: 'deadline', time: extractTime(n.deadline) });
+			else if (extractDate(n.scheduled) === date) result.push({ node: n, reason: 'scheduled', time: extractTime(n.scheduled) });
+		}
+		// Sort by time (items with time first, then by time string, then by priority)
+		result.sort((a, b) => {
+			if (a.time && !b.time) return -1;
+			if (!a.time && b.time) return 1;
+			if (a.time && b.time) return a.time.localeCompare(b.time);
+			return (a.node.priority ?? 'Z').localeCompare(b.node.priority ?? 'Z');
 		});
+		return result;
 	}
 
 	const overdueItems = $derived(items.filter(n => isOverdue(n)));
@@ -214,8 +230,12 @@
 							{day.label} <span class="font-normal opacity-60">{day.date}</span>
 						</h3>
 						{#if dayItems.length > 0}
-							{#each dayItems as item}
-								{@render taskRow(item)}
+							{#each dayItems as di}
+								<div class="flex items-center gap-1.5">
+									<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;{di.reason === 'deadline' ? 'color:#dc2626;background:#fef2f2' : 'color:#2563eb;background:#eff6ff'}">{di.reason === 'deadline' ? 'DL' : 'SC'}</span>
+									{#if di.time}<span style="font-size:10px;color:#6b7280;font-variant-numeric:tabular-nums">{di.time}</span>{/if}
+									<div class="flex-1">{@render taskRow(di.node)}</div>
+								</div>
 							{/each}
 						{:else}
 							<p class="py-0.5 text-[11px] text-surface-700/40 dark:text-surface-300/40">—</p>
@@ -257,43 +277,55 @@
 </div>
 
 {#snippet taskRow(item: NodeRecord)}
-	{@const rowId = item.id}
+	{@const dlDate = extractDate(item.deadline)}
+	{@const dlTime = extractTime(item.deadline)}
+	{@const scDate = extractDate(item.scheduled)}
+	{@const scTime = extractTime(item.scheduled)}
 	<div
 		style="position:relative;overflow:hidden;border-radius:8px"
 		ontouchstart={(e) => {
 			const el = (e.currentTarget as HTMLElement);
 			const inner = el.querySelector('[data-inner]') as HTMLElement;
-			if (!inner) return;
+			const actions = el.querySelector('[data-actions]') as HTMLElement;
+			if (!inner || !actions) return;
 			const startX = e.touches[0].clientX;
 			let dx = 0;
-			const onMove = (ev: TouchEvent) => { dx = startX - ev.touches[0].clientX; inner.style.transform = `translateX(${Math.max(-160, Math.min(0, -dx))}px)`; };
+			const onMove = (ev: TouchEvent) => {
+				dx = startX - ev.touches[0].clientX;
+				const clamped = Math.max(-160, Math.min(0, -dx));
+				inner.style.transform = `translateX(${clamped}px)`;
+				actions.style.opacity = String(Math.min(1, Math.abs(clamped) / 80));
+			};
 			const onEnd = () => {
 				document.removeEventListener('touchmove', onMove);
 				document.removeEventListener('touchend', onEnd);
-				inner.style.transition = 'transform 0.2s ease';
-				inner.style.transform = dx > 60 ? 'translateX(-160px)' : 'translateX(0)';
-				setTimeout(() => { inner.style.transition = ''; }, 200);
+				const open = dx > 60;
+				inner.style.transition = 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)';
+				actions.style.transition = 'opacity 0.25s ease';
+				inner.style.transform = open ? 'translateX(-160px)' : 'translateX(0)';
+				actions.style.opacity = open ? '1' : '0';
+				setTimeout(() => { inner.style.transition = ''; actions.style.transition = ''; }, 250);
 			};
 			document.addEventListener('touchmove', onMove, { passive: true });
 			document.addEventListener('touchend', onEnd);
 		}}
 	>
-		<!-- Action buttons revealed by swipe -->
-		<div style="position:absolute;right:0;top:0;bottom:0;display:flex">
-			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#dc2626;color:white;font-size:11px;font-weight:600;cursor:pointer">
-				DL
-				<input type="date" value={extractDate(item.deadline)} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
-				<span style="font-size:9px;opacity:0.8">{extractDate(item.deadline) || 'none'}</span>
+		<!-- Action buttons (fade in as user swipes) -->
+		<div data-actions style="position:absolute;right:0;top:0;bottom:0;display:flex;opacity:0">
+			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#dc2626;color:white;font-size:12px;font-weight:600;cursor:pointer;gap:2px">
+				Deadline
+				<input type="date" value={dlDate} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
+				<span style="font-size:10px;opacity:0.8">{dlDate || 'set'}</span>
 			</label>
-			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#2563eb;color:white;font-size:11px;font-weight:600;cursor:pointer">
-				SC
-				<input type="date" value={extractDate(item.scheduled)} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
-				<span style="font-size:9px;opacity:0.8">{extractDate(item.scheduled) || 'none'}</span>
+			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#2563eb;color:white;font-size:12px;font-weight:600;cursor:pointer;gap:2px">
+				Schedule
+				<input type="date" value={scDate} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
+				<span style="font-size:10px;opacity:0.8">{scDate || 'set'}</span>
 			</label>
 		</div>
 
-		<!-- Main row content (swipes left to reveal actions) -->
-		<div data-inner style="position:relative;display:flex;align-items:center;gap:8px;padding:8px 4px;background:var(--color-surface-0, #fff);will-change:transform; {changingId === item.id ? 'opacity:0.5' : ''}">
+		<!-- Main row -->
+		<div data-inner class="bg-surface-0 dark:bg-surface-950" style="position:relative;display:flex;align-items:center;gap:8px;padding:8px 4px;will-change:transform;{changingId === item.id ? 'opacity:0.5;' : ''}">
 			<select
 				value={item.todo ?? ''}
 				onchange={(e) => setState(item, (e.target as HTMLSelectElement).value || null)}
@@ -307,10 +339,18 @@
 
 			<button onclick={() => navigation.navigateToNode(item.id)} style="min-width:0;flex:1;text-align:left">
 				<div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{isDone(item) ? 'text-decoration:line-through;opacity:0.6' : 'font-weight:500'}">{item.title ?? 'Untitled'}</div>
-				{#if item.deadline || item.scheduled}
-					<div style="display:flex;gap:8px;font-size:10px;margin-top:2px">
-						{#if item.deadline}<span style="color:{isOverdue(item) ? '#dc2626' : '#6b7280'}">DL: {extractDate(item.deadline)}</span>{/if}
-						{#if item.scheduled}<span style="color:#2563eb">SC: {extractDate(item.scheduled)}</span>{/if}
+				{#if dlDate || scDate}
+					<div style="display:flex;gap:6px;font-size:10px;margin-top:2px;flex-wrap:wrap">
+						{#if dlDate}
+							<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 4px;border-radius:3px;background:{isOverdue(item) ? '#fef2f2' : '#fff7ed'};color:{isOverdue(item) ? '#dc2626' : '#ea580c'}">
+								<span style="font-weight:700">DL</span> {dlDate}{#if dlTime} {dlTime}{/if}
+							</span>
+						{/if}
+						{#if scDate}
+							<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 4px;border-radius:3px;background:#eff6ff;color:#2563eb">
+								<span style="font-weight:700">SC</span> {scDate}{#if scTime} {scTime}{/if}
+							</span>
+						{/if}
 					</div>
 				{/if}
 			</button>
