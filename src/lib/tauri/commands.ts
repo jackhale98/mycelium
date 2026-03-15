@@ -40,6 +40,10 @@ export async function rebuildDatabase(): Promise<SyncResult> {
 	return invoke('rebuild_database');
 }
 
+export async function checkVaultChanges(): Promise<boolean> {
+	return invoke('check_vault_changes');
+}
+
 // Node commands
 export async function getNode(id: string): Promise<NodeRecord | null> {
 	return invoke('get_node', { id });

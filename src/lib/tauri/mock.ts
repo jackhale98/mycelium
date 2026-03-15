@@ -138,8 +138,33 @@ Built with:
 - SQLite database (org-roam v2 schema)
 - [[id:node-cargo][Cargo]] workspace for the Rust crates
 
+* TODO [#A] Mobile Polish
+DEADLINE: <2026-03-20 Fri>
+:PROPERTIES:
+:ID: node-mycelium-mobile
+:END:
+
+- [ ] Touch targets >= 44px
+- [ ] Gesture navigation
+- [ ] App store screenshots
+
+* TODO [#B] App Store Release
+SCHEDULED: <2026-04-01 Tue>
+:PROPERTIES:
+:ID: node-mycelium-release
+:END:
+
+Prepare for app store submission.
+
+* DONE Design Architecture
+CLOSED: [2026-01-10 Fri 15:30]
+:PROPERTIES:
+:ID: node-mycelium-arch
+:END:
+
+Decided on Tauri + Svelte + Rust stack.
+
 * Status
-DEADLINE: <2024-06-01 Sat>
 
 - [X] Design architecture
 - [X] Implement org parser
@@ -166,7 +191,7 @@ Read about [[id:node-org-roam][Org Roam]] v2 schema changes.
 Updated the [[id:node-cargo][Cargo]] workspace dependencies.
 
 * TODO Review [[id:node-errors][error handling]] patterns
-SCHEDULED: <2024-01-16 Tue>
+SCHEDULED: <2026-03-16 Mon>
 `,
 };
 
@@ -221,6 +246,9 @@ function buildNodes(): NodeRecord[] {
 			let level = 0;
 			let title = fileTitle;
 			let todo: string | null = null;
+			let priority: string | null = null;
+			let scheduled: string | null = null;
+			let deadline: string | null = null;
 
 			if (!isFirst) {
 				// Find the nearest headline before this :ID:
@@ -230,15 +258,21 @@ function buildNodes(): NodeRecord[] {
 				if (lastHeadline) {
 					const stars = lastHeadline.match(/^(\*+)/);
 					level = stars ? stars[1].length : 1;
-					// Extract title from headline
 					let hlText = lastHeadline.replace(/^\*+\s*/, '');
-					// Check for TODO keyword
-					const todoMatch = hlText.match(/^(TODO|DONE|NEXT)\s+/);
-					if (todoMatch) {
-						todo = todoMatch[1];
-						hlText = hlText.substring(todoMatch[0].length);
-					}
+					const todoMatch = hlText.match(/^(TODO|DONE|NEXT|WAITING|CANCELLED)\s+/);
+					if (todoMatch) { todo = todoMatch[1]; hlText = hlText.substring(todoMatch[0].length); }
+					const prioMatch = hlText.match(/^\[#([A-Z])\]\s*/);
+					if (prioMatch) { priority = prioMatch[1]; hlText = hlText.substring(prioMatch[0].length); }
 					title = hlText.replace(/\s+:[\w:]+:\s*$/, '').trim();
+				}
+				// Check for SCHEDULED/DEADLINE on lines after the headline
+				const after = content.substring(pos);
+				const afterLines = after.split('\n').slice(0, 5);
+				for (const al of afterLines) {
+					const dlMatch = al.match(/DEADLINE:\s*<([^>]+)>/);
+					if (dlMatch) deadline = `<${dlMatch[1]}>`;
+					const scMatch = al.match(/SCHEDULED:\s*<([^>]+)>/);
+					if (scMatch) scheduled = `<${scMatch[1]}>`;
 				}
 			}
 
@@ -248,9 +282,9 @@ function buildNodes(): NodeRecord[] {
 				level,
 				pos,
 				todo,
-				priority: null,
-				scheduled: null,
-				deadline: null,
+				priority,
+				scheduled,
+				deadline,
 				title,
 				properties: `{"ID":"${id}"}`,
 				olp: '[]',
@@ -466,15 +500,42 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 	rename_node: () => undefined,
 	import_image: () => 'images/demo-image.png',
 	rebuild_database: () => ({ total_files: 5, indexed: 5, skipped: 0, removed: 0 }),
-	get_agenda: () => MOCK_NODES.filter(n => n.todo || n.scheduled || n.deadline),
+	check_vault_changes: () => false,
+	get_agenda: () => MOCK_NODES
+		.filter(n => n.todo || n.scheduled || n.deadline)
+		.sort((a, b) => {
+			// Deadline first, then scheduled, then priority
+			const dl = (a.deadline ?? '').localeCompare(b.deadline ?? '');
+			if (a.deadline && !b.deadline) return -1;
+			if (!a.deadline && b.deadline) return 1;
+			if (dl !== 0) return dl;
+			const sc = (a.scheduled ?? '').localeCompare(b.scheduled ?? '');
+			if (a.scheduled && !b.scheduled) return -1;
+			if (!a.scheduled && b.scheduled) return 1;
+			if (sc !== 0) return sc;
+			return (a.priority ?? 'Z').localeCompare(b.priority ?? 'Z');
+		}),
 	get_unlinked_mentions: (args: Record<string, unknown>) => {
 		const nid = args.nodeId as string;
 		const nd = MOCK_NODES.find(n => n.id === nid);
-		if (!nd?.title) return [];
-		return MOCK_NODES.filter(n => n.id !== nid).slice(0, 2).map(n => ({
-			id: n.id, file: n.file, title: n.title,
-			snippet: `...mentions "${nd.title}" in the text...`, match_type: 'mention',
-		}));
+		if (!nd?.title || nd.title.length < 3) return [];
+		const ndFile = nd.file;
+		// Search other files (not the same file) for title mentions
+		const titleLower = nd.title.toLowerCase();
+		const linked = ALL_LINKS.filter(l => l.targetNodeId === nid).map(l => l.sourceFile);
+		const results: {id:string;file:string;title:string|null;snippet:string|null;match_type:string}[] = [];
+		for (const [file, content] of Object.entries(FILES)) {
+			if (file === ndFile) continue; // skip own file
+			if (linked.includes(file)) continue; // skip already linked
+			if (content.toLowerCase().includes(titleLower)) {
+				const fileNode = MOCK_NODES.find(n => n.file === file && n.level === 0);
+				if (fileNode) {
+					const line = content.split('\n').find(l => l.toLowerCase().includes(titleLower));
+					results.push({ id: fileNode.id, file, title: fileNode.title, snippet: line?.trim() ?? null, match_type: 'mention' });
+				}
+			}
+		}
+		return results;
 	},
 	quick_capture: () => '/vault/daily/20260315-2026_03_15.org',
 };

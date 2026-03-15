@@ -16,6 +16,7 @@ pub fn run() {
             commands::vault::list_files,
             commands::vault::sync_vault,
             commands::vault::rebuild_database,
+            commands::vault::check_vault_changes,
             // Nodes
             commands::node::get_node,
             commands::node::list_nodes,

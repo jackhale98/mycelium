@@ -257,58 +257,58 @@
 </div>
 
 {#snippet taskRow(item: NodeRecord)}
-	<div class="flex items-start gap-2 py-2 {changingId === item.id ? 'opacity-50' : ''}">
-		<!-- TODO state dropdown -->
-		<select
-			value={item.todo ?? ''}
-			onchange={(e) => setState(item, (e.target as HTMLSelectElement).value || null)}
-			disabled={changingId === item.id}
-			class="h-7 shrink-0 rounded border-0 py-0 pl-1 pr-5 text-[10px] font-bold"
-			style="color:{isDone(item) ? '#16a34a' : item.todo ? '#dc2626' : '#6b7280'};background:{isDone(item) ? '#f0fdf4' : item.todo ? '#fef2f2' : 'transparent'}"
-		>
-			<option value="">None</option>
-			{#each orgConfig.todoKeywords as kw}<option value={kw}>{kw}</option>{/each}
-			{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
-		</select>
-
-		<!-- Content — tap title to open node -->
-		<div class="min-w-0 flex-1">
-			<button onclick={() => navigation.navigateToNode(item.id)} class="w-full text-left">
-				<div class="truncate text-sm {isDone(item) ? 'line-through opacity-60' : 'font-medium'}">{item.title ?? 'Untitled'}</div>
-			</button>
-			<!-- Date editors -->
-			<div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-				<label class="flex items-center gap-1" style="color:#dc2626">
-					<span class="font-medium">DL</span>
-					<input
-						type="date"
-						value={extractDate(item.deadline)}
-						onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)}
-						class="rounded border border-surface-200 bg-transparent px-1 py-0.5 text-[11px] dark:border-surface-700"
-					/>
-				</label>
-				<label class="flex items-center gap-1" style="color:#2563eb">
-					<span class="font-medium">SC</span>
-					<input
-						type="date"
-						value={extractDate(item.scheduled)}
-						onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)}
-						class="rounded border border-surface-200 bg-transparent px-1 py-0.5 text-[11px] dark:border-surface-700"
-					/>
-				</label>
-			</div>
+	<div class="relative overflow-hidden rounded-lg" style="touch-action: pan-y">
+		<!-- Swipe actions (revealed by swiping left) -->
+		<div class="absolute right-0 top-0 bottom-0 flex items-stretch">
+			<label class="flex w-20 cursor-pointer flex-col items-center justify-center text-[10px] font-medium text-white" style="background:#dc2626">
+				DL
+				<input type="date" value={extractDate(item.deadline)} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} class="absolute opacity-0 w-0 h-0" />
+				<span class="text-[9px] opacity-80">{extractDate(item.deadline) || 'set'}</span>
+			</label>
+			<label class="flex w-20 cursor-pointer flex-col items-center justify-center text-[10px] font-medium text-white" style="background:#2563eb">
+				SC
+				<input type="date" value={extractDate(item.scheduled)} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} class="absolute opacity-0 w-0 h-0" />
+				<span class="text-[9px] opacity-80">{extractDate(item.scheduled) || 'set'}</span>
+			</label>
 		</div>
 
-		<!-- Priority dropdown -->
-		<select
-			value={item.priority ?? ''}
-			onchange={(e) => setPriority(item, (e.target as HTMLSelectElement).value || null)}
-			disabled={changingId === item.id}
-			class="h-7 shrink-0 rounded border-0 py-0 pl-1 pr-4 text-[10px] font-bold"
-			style="color:#ea580c;{item.priority ? 'background:#fff7ed' : 'background:transparent'}"
-		>
-			<option value="">—</option>
-			{#each orgConfig.priorities as p}<option value={p}>#{p}</option>{/each}
-		</select>
+		<!-- Main row (slides over the actions) -->
+		<div class="relative flex items-center gap-2 bg-surface-0 px-1 py-2 dark:bg-surface-950 {changingId === item.id ? 'opacity-50' : ''}" style="transition: transform 0.2s ease">
+			<!-- TODO state dropdown -->
+			<select
+				value={item.todo ?? ''}
+				onchange={(e) => setState(item, (e.target as HTMLSelectElement).value || null)}
+				disabled={changingId === item.id}
+				class="h-7 shrink-0 rounded border-0 py-0 pl-1 pr-5 text-[10px] font-bold"
+				style="color:{isDone(item) ? '#16a34a' : item.todo ? '#dc2626' : '#6b7280'};background:{isDone(item) ? '#f0fdf4' : item.todo ? '#fef2f2' : 'transparent'}"
+			>
+				<option value="">None</option>
+				{#each orgConfig.todoKeywords as kw}<option value={kw}>{kw}</option>{/each}
+				{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
+			</select>
+
+			<!-- Content -->
+			<button onclick={() => navigation.navigateToNode(item.id)} class="min-w-0 flex-1 text-left">
+				<div class="truncate text-sm {isDone(item) ? 'line-through opacity-60' : 'font-medium'}">{item.title ?? 'Untitled'}</div>
+				{#if item.deadline || item.scheduled}
+					<div class="flex gap-2 text-[10px]">
+						{#if item.deadline}<span style="color:{isOverdue(item) ? '#dc2626' : '#6b7280'}">DL: {extractDate(item.deadline)}</span>{/if}
+						{#if item.scheduled}<span style="color:#2563eb">SC: {extractDate(item.scheduled)}</span>{/if}
+					</div>
+				{/if}
+			</button>
+
+			<!-- Priority dropdown -->
+			<select
+				value={item.priority ?? ''}
+				onchange={(e) => setPriority(item, (e.target as HTMLSelectElement).value || null)}
+				disabled={changingId === item.id}
+				class="h-7 shrink-0 rounded border-0 py-0 pl-1 pr-4 text-[10px] font-bold"
+				style="color:#ea580c;{item.priority ? 'background:#fff7ed' : 'background:transparent'}"
+			>
+				<option value="">—</option>
+				{#each orgConfig.priorities as p}<option value={p}>#{p}</option>{/each}
+			</select>
+		</div>
 	</div>
 {/snippet}

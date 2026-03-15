@@ -57,6 +57,18 @@ pub async fn sync_vault(state: State<'_, AppState>) -> Result<sync::SyncResult, 
     state.with_db(|conn| sync::sync_vault(conn, &path_str).map_err(|e| e.to_string()))
 }
 
+/// Check if the vault has changes (fast mtime comparison, no file reads).
+/// Frontend can call this on focus to decide whether to sync.
+#[tauri::command]
+pub async fn check_vault_changes(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let vault_path = state.vault_path()?;
+    let path_str = vault_path.to_string_lossy().to_string();
+
+    state.with_db(|conn| sync::has_changes(conn, &path_str).map_err(|e| e.to_string()))
+}
+
 /// Rebuild the database from scratch: drop all data and re-index every file.
 #[tauri::command]
 pub async fn rebuild_database(

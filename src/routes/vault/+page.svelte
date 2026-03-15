@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { vault } from '$lib/stores/vault.svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
-	import { syncVault, getAllTags, getNodesByTag } from '$lib/tauri/commands';
+	import { syncVault, checkVaultChanges, getAllTags, getNodesByTag, listFiles, listNodes } from '$lib/tauri/commands';
 	import type { NodeRecord } from '$lib/types/node';
 	import { onDbUpdated } from '$lib/tauri/events';
 	import { theme } from '$lib/stores/theme.svelte';
@@ -45,7 +45,19 @@
 			return;
 		}
 		const unlistenPromise = onDbUpdated();
-		function handleFocus() { syncVault().catch(() => {}); }
+		async function handleFocus() {
+			try {
+				const changed = await checkVaultChanges();
+				if (changed) {
+					const result = await syncVault();
+					if (result.indexed > 0 || result.removed > 0) {
+						const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
+						vault.updateFiles(files);
+						vault.updateNodes(nodes);
+					}
+				}
+			} catch {}
+		}
 		window.addEventListener('focus', handleFocus);
 
 		// Load tags
