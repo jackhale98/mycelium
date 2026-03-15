@@ -58,33 +58,42 @@
 	}
 
 	async function handlePickFolder() {
-		if (isMobile()) {
-			// On iOS/Android: try native folder picker via custom Swift plugin first
-			try {
-				const { invoke } = await import('@tauri-apps/api/core');
-				const result = await invoke<{ path: string | null }>('plugin:folder-picker|pick_folder');
-				if (result?.path) {
-					vaultPath = result.path;
-					return;
-				}
-			} catch {
-				// Swift plugin not available — fall back to folder browser
-			}
-			showFolderBrowser = true;
-			return;
-		}
-		// Desktop: use native dialog
 		try {
 			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({ directory: true, multiple: false });
-			if (selected) {
-				let path = selected as string;
-				if (path.startsWith('file://')) {
-					path = decodeURIComponent(path.substring(7));
+
+			if (isMobile()) {
+				// On iOS: use native file picker to select any .org file,
+				// then derive the vault folder from its parent directory.
+				// This presents the native liquid glass iOS picker UI.
+				const file = await open({
+					title: 'Select any .org file in your vault',
+					filters: [{ name: 'Org files', extensions: ['org'] }],
+					multiple: false,
+				});
+				if (file) {
+					let filePath = file as string;
+					if (filePath.startsWith('file://')) {
+						filePath = decodeURIComponent(filePath.substring(7));
+					}
+					// Get parent directory
+					const lastSlash = filePath.lastIndexOf('/');
+					if (lastSlash > 0) {
+						vaultPath = filePath.substring(0, lastSlash);
+					}
 				}
-				vaultPath = path;
+			} else {
+				// Desktop: use native folder picker
+				const selected = await open({ directory: true, multiple: false });
+				if (selected) {
+					let path = selected as string;
+					if (path.startsWith('file://')) {
+						path = decodeURIComponent(path.substring(7));
+					}
+					vaultPath = path;
+				}
 			}
 		} catch {
+			// Dialog not available — show in-app folder browser
 			showFolderBrowser = true;
 		}
 	}
@@ -148,10 +157,7 @@
 
 			<!-- Info -->
 			<p class="text-center text-xs text-surface-700 dark:text-surface-300">
-				Select a directory containing your .org files.
-			</p>
-			<p class="text-center text-[10px] text-surface-700/60 dark:text-surface-300/60">
-				On iOS, use a folder from iCloud Drive or On My iPhone in the Files app. Sync your vault with iCloud, Syncthing, or Working Copy.
+				On mobile, tap Browse and select any .org file in your vault — the app will use its folder.
 			</p>
 		</div>
 	</div>

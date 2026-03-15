@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { editor } from '$lib/stores/editor.svelte';
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 
@@ -34,12 +35,33 @@
 	let showPrioPicker = $state(false);
 	let hoverRow = $state(0);
 	let hoverCol = $state(0);
+	let toolbarEl: HTMLElement;
+	let keyboardOffset = $state(0);
+
+	onMount(() => {
+		// Track keyboard height via visualViewport API (works on iOS Safari + Tauri)
+		const vv = window.visualViewport;
+		if (vv) {
+			const update = () => {
+				const windowHeight = window.innerHeight;
+				const viewportHeight = vv.height;
+				keyboardOffset = Math.max(0, windowHeight - viewportHeight - vv.offsetTop);
+			};
+			vv.addEventListener('resize', update);
+			vv.addEventListener('scroll', update);
+			return () => {
+				vv.removeEventListener('resize', update);
+				vv.removeEventListener('scroll', update);
+			};
+		}
+	});
 </script>
 
 {#if editor.hasFile}
 	<div
-		class="flex h-12 shrink-0 items-center gap-0.5 overflow-x-auto border-t border-surface-200 bg-surface-50 px-2 dark:border-surface-700 dark:bg-surface-900"
-		style="-webkit-overflow-scrolling: touch; padding-bottom: env(safe-area-inset-bottom, 0px);"
+		bind:this={toolbarEl}
+		class="flex h-12 items-center gap-0.5 overflow-x-auto border-t border-surface-200 bg-surface-50 px-2 dark:border-surface-700 dark:bg-surface-900"
+		style="-webkit-overflow-scrolling: touch; {keyboardOffset > 0 ? `position:fixed;bottom:${keyboardOffset}px;left:0;right:0;z-index:50;` : `flex-shrink:0;padding-bottom:env(safe-area-inset-bottom, 0px);`}"
 	>
 		<!-- Link (primary action) -->
 		<button onclick={() => onLink?.()} title="Insert link (Cmd+K)" class="flex h-9 min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-semibold hover:bg-surface-200 dark:hover:bg-surface-700" style="color:#16a34a">Link</button>
@@ -48,19 +70,12 @@
 
 		<!-- Heading level picker -->
 		<div class="relative shrink-0">
-			<button
-				onclick={() => (showHeadingPicker = !showHeadingPicker)}
-				title="Heading"
-				class="flex h-9 min-w-[40px] items-center justify-center rounded-md text-xs font-bold text-surface-700 hover:bg-surface-200 active:bg-surface-300 dark:text-surface-300 dark:hover:bg-surface-700"
-			>H</button>
+			<button onclick={() => (showHeadingPicker = !showHeadingPicker)} title="Heading" class="flex h-9 min-w-[40px] items-center justify-center rounded-md text-xs font-bold text-surface-700 hover:bg-surface-200 active:bg-surface-300 dark:text-surface-300 dark:hover:bg-surface-700">H</button>
 			{#if showHeadingPicker}
 				<button class="fixed inset-0 z-20" onclick={() => (showHeadingPicker = false)} aria-label="Close"></button>
 				<div class="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-lg border border-surface-200 bg-surface-0 p-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
 					{#each [1,2,3,4] as lvl}
-						<button
-							onclick={() => { onHeading?.(lvl); showHeadingPicker = false; }}
-							class="flex h-8 w-8 items-center justify-center rounded text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800"
-						>H{lvl}</button>
+						<button onclick={() => { onHeading?.(lvl); showHeadingPicker = false; }} class="flex h-8 w-8 items-center justify-center rounded text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800">H{lvl}</button>
 					{/each}
 				</div>
 			{/if}
@@ -97,26 +112,23 @@
 			{/if}
 		</div>
 
-		<!-- DEADLINE and SCHEDULED -->
 		<button onclick={() => onDeadline?.()} title="Set DEADLINE" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-[10px] font-semibold text-red-600 hover:bg-surface-200 dark:text-red-400 dark:hover:bg-surface-700">DL</button>
 		<button onclick={() => onScheduled?.()} title="Set SCHEDULED" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-[10px] font-semibold text-blue-600 hover:bg-surface-200 dark:text-blue-400 dark:hover:bg-surface-700">SC</button>
 
 		<div class="mx-0.5 h-6 w-px shrink-0 bg-surface-200 dark:bg-surface-700"></div>
 
-		<!-- Inline formatting -->
-		<button onclick={() => onBold?.()} title="Bold *text*" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">B</button>
-		<button onclick={() => onItalic?.()} title="Italic /text/" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs italic text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">I</button>
-		<button onclick={() => onUnderline?.()} title="Underline _text_" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs underline text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">U</button>
-		<button onclick={() => onStrike?.()} title="Strikethrough +text+" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs line-through text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">S</button>
-		<button onclick={() => onCode?.()} title="Code ~text~" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md font-mono text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">~c~</button>
-		<button onclick={() => onVerbatim?.()} title="Verbatim =text=" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md font-mono text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">=v=</button>
+		<button onclick={() => onBold?.()} title="Bold" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">B</button>
+		<button onclick={() => onItalic?.()} title="Italic" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs italic text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">I</button>
+		<button onclick={() => onUnderline?.()} title="Underline" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs underline text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">U</button>
+		<button onclick={() => onStrike?.()} title="Strikethrough" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-xs line-through text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">S</button>
+		<button onclick={() => onCode?.()} title="Code" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md font-mono text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">~c~</button>
+		<button onclick={() => onVerbatim?.()} title="Verbatim" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md font-mono text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">=v=</button>
 
-		<!-- Separator -->
-		<div class="mx-1 h-6 w-px shrink-0 bg-surface-200 dark:bg-surface-700"></div>
+		<div class="mx-0.5 h-6 w-px shrink-0 bg-surface-200 dark:bg-surface-700"></div>
 
-		<!-- Structure -->
-		<button onclick={() => onList?.()} title="List item (- )" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&bull;</button>
-		<button onclick={() => onCheckbox?.()} title="Checkbox (- [ ] )" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&#9744;</button>
+		<button onclick={() => onList?.()} title="List" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&bull;</button>
+		<button onclick={() => onCheckbox?.()} title="Checkbox" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&#9744;</button>
+
 		<div class="relative shrink-0">
 			<button onclick={() => (showTablePicker = !showTablePicker)} title="Table" class="flex h-9 min-w-[36px] items-center justify-center rounded-md font-mono text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">|T|</button>
 			{#if showTablePicker}
@@ -137,15 +149,15 @@
 				</div>
 			{/if}
 		</div>
+
 		<button onclick={() => onSrcBlock?.()} title="Code block" class="flex h-9 min-w-[40px] shrink-0 items-center justify-center rounded-md font-mono text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">SRC</button>
-		<button onclick={() => onQuote?.()} title="Quote block" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&rdquo;</button>
+		<button onclick={() => onQuote?.()} title="Quote" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">&rdquo;</button>
 		<button onclick={() => onTimestamp?.()} title="Timestamp" class="flex h-9 min-w-[40px] shrink-0 items-center justify-center rounded-md text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">Date</button>
-		<button onclick={() => onImage?.()} title="Insert image" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">
+		<button onclick={() => onImage?.()} title="Image" class="flex h-9 min-w-[36px] shrink-0 items-center justify-center rounded-md text-sm text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">
 			<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M6.75 7.5a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75z" /></svg>
 		</button>
 
 		<div class="flex-1 shrink-0"></div>
-
 		{#if editor.isDirty}
 			<span class="shrink-0 text-xs text-amber-600 dark:text-amber-400">Unsaved</span>
 		{/if}
