@@ -38,6 +38,7 @@
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@tauri-apps/cli": "^2.10.1",
     "@types/d3-force": "^3.0.0",
     "@types/d3-selection": "^3.0.0",
     "@types/d3-zoom": "^3.0.0",
