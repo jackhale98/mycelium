@@ -106,3 +106,8 @@ export async function exportMarkdown(filePath: string): Promise<string> {
 export async function exportHtml(filePath: string): Promise<string> {
 	return invoke('export_html', { filePath });
 }
+
+// Node refactoring
+export async function renameNode(nodeId: string, newTitle: string): Promise<void> {
+	return invoke('rename_node', { nodeId, newTitle });
+}

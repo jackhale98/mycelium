@@ -6,7 +6,7 @@
 	import {
 		getNode, getBacklinks, getForwardLinks,
 		readFile, saveFile, listNodes,
-		exportMarkdown, exportHtml,
+		exportMarkdown, exportHtml, renameNode,
 	} from '$lib/tauri/commands';
 	import RenderedView from '$lib/components/editor/RenderedView.svelte';
 	import OrgEditor from '$lib/components/editor/OrgEditor.svelte';
@@ -27,6 +27,8 @@
 	let editorComponent: OrgEditor;
 	let nodeId = $state<string | null>(null);
 	let showSource = $state(false);
+	let showRename = $state(false);
+	let renameTitle = $state('');
 	let showLinks = $state(false);
 
 	// Auto-save debounce
@@ -111,6 +113,22 @@
 	}
 	function dl(b: Blob, n: string) { const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=n; a.click(); URL.revokeObjectURL(a.href); }
 
+	function startRename() {
+		showMenu = false;
+		renameTitle = node?.title ?? '';
+		showRename = true;
+	}
+	async function handleRename() {
+		if (!nodeId || !renameTitle.trim()) return;
+		try {
+			await renameNode(nodeId, renameTitle.trim());
+			showRename = false;
+			// Reload the node
+			await loadNode(nodeId);
+			try { vault.updateNodes(await listNodes()); } catch {}
+		} catch (e) { error = String(e); }
+	}
+
 	// Source mode toolbar actions
 	function onBold() { editorComponent?.wrapSelection('*', '*'); }
 	function onItalic() { editorComponent?.wrapSelection('/', '/'); }
@@ -187,6 +205,8 @@
 			{#if showMenu}
 				<button class="fixed inset-0 z-30" onclick={() => (showMenu = false)} aria-label="Close"></button>
 				<div class="absolute right-0 top-full z-40 mt-1 w-48 rounded-lg border border-surface-200 bg-surface-0 py-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
+					<button onclick={startRename} class="flex w-full px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-800">Rename Node</button>
+					<div class="my-1 border-t border-surface-200 dark:border-surface-700"></div>
 					<button onclick={handleExportMd} class="flex w-full px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-800">Export Markdown</button>
 					<button onclick={handleExportHtml} class="flex w-full px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-800">Export HTML</button>
 				</div>
@@ -205,7 +225,7 @@
 						<OrgEditor bind:this={editorComponent} />
 					{:else}
 						{#key editor.content}
-							<RenderedView content={editor.content} onLinkClick={(id) => navigation.navigateToNode(id)} onContentChange={(c) => editor.updateContent(c)} />
+							<RenderedView content={editor.content} vaultPath={vault.path ?? ''} onLinkClick={(id) => navigation.navigateToNode(id)} onContentChange={(c) => editor.updateContent(c)} />
 						{/key}
 					{/if}
 				</div>
@@ -247,4 +267,24 @@
 <!-- Link inserter only in edit mode -->
 {#if showLinkSwitcher && showSource}
 	<QuickSwitcher open={true} mode="insert-link" onclose={() => (showLinkSwitcher = false)} oninsert={handleInsertLink} />
+{/if}
+
+<!-- Rename dialog -->
+{#if showRename}
+	<button class="fixed inset-0 z-40 bg-black/50" onclick={() => (showRename = false)} aria-label="Close"></button>
+	<div class="fixed inset-x-4 top-[20%] z-50 mx-auto max-w-md rounded-xl border border-surface-200 bg-surface-0 p-5 shadow-2xl dark:border-surface-700 dark:bg-surface-900">
+		<h2 class="mb-3 text-lg font-bold">Rename Node</h2>
+		<p class="mb-3 text-xs text-surface-700 dark:text-surface-300">This will update the title and all backlink descriptions across your vault.</p>
+		<input
+			type="text"
+			bind:value={renameTitle}
+			onkeydown={(e) => e.key === 'Enter' && handleRename()}
+			class="w-full rounded-lg border border-surface-200 bg-surface-50 px-4 py-2.5 text-sm focus:border-mycelium-500 focus:outline-none focus:ring-2 focus:ring-mycelium-500/20 dark:border-surface-700 dark:bg-surface-950"
+			autofocus
+		/>
+		<div class="mt-4 flex justify-end gap-2">
+			<button onclick={() => (showRename = false)} class="rounded-lg px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-800">Cancel</button>
+			<button onclick={handleRename} disabled={!renameTitle.trim()} class="rounded-lg bg-mycelium-600 px-4 py-2 text-sm font-semibold text-white hover:bg-mycelium-700 disabled:opacity-50">Rename</button>
+		</div>
+	</div>
 {/if}

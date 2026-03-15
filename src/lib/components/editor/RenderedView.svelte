@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	let { content = '', onLinkClick, onContentChange }: {
+	let { content = '', vaultPath = '', onLinkClick, onContentChange }: {
 		content: string;
+		vaultPath?: string;
 		onLinkClick?: (id: string) => void;
 		onContentChange?: (newContent: string) => void;
 	} = $props();
+
+	const imgExts = new Set(['png','jpg','jpeg','gif','svg','webp','bmp','ico']);
 	let el: HTMLDivElement;
 
 	onMount(() => { renderContent(); });
@@ -115,6 +118,24 @@
 				currentBody.appendChild(ul);continue;
 			}
 
+			// Standalone image: [[file:path.png]] or [[./path.png]]
+			const imgMatch = t.match(/^\[\[(?:file:)?([^\]]+?)\]\]$/);
+			if (imgMatch) {
+				const path = imgMatch[1];
+				const ext = path.split('.').pop()?.toLowerCase() ?? '';
+				if (imgExts.has(ext)) {
+					const imgWrap = mk('div', 'margin:12px 0;text-align:center');
+					const img = document.createElement('img');
+					img.src = resolveImagePath(path);
+					img.alt = path.split('/').pop() ?? path;
+					img.style.cssText = 'max-width:100%;border-radius:8px;border:1px solid #e2e8f0';
+					img.onerror = () => { img.style.display = 'none'; const fallback = mk('p','font-size:13px;color:#9ca3af;font-style:italic'); fallback.textContent = 'Image not found: ' + path; imgWrap.appendChild(fallback); };
+					imgWrap.appendChild(img);
+					currentBody.appendChild(imgWrap);
+					i++; continue;
+				}
+			}
+
 			// Planning
 			if(/^(SCHEDULED|DEADLINE|CLOSED):/.test(t)){const p=mk('p','font-size:13px;color:#6b7280;margin:4px 0');inl(p,t);currentBody.appendChild(p);i++;continue;}
 
@@ -140,6 +161,18 @@
 		return e;
 	}
 
+	function resolveImagePath(path: string): string {
+		// If absolute, use as-is; if relative, resolve against vault path
+		if (path.startsWith('/') || path.startsWith('http')) return path;
+		if (vaultPath) return vaultPath.replace(/\/$/, '') + '/' + path.replace(/^\.\//, '');
+		return path;
+	}
+
+	function isImagePath(path: string): boolean {
+		const ext = path.split('.').pop()?.toLowerCase() ?? '';
+		return imgExts.has(ext);
+	}
+
 	function inl(target: HTMLElement | string, parentOrText?: HTMLElement | string) {
 		// Handle both inl(parent, text) and inl(text, parent) for backward compat
 		let parent: HTMLElement;
@@ -158,6 +191,11 @@
 			const lm2 = r.match(/\[\[id:([^\]]+?)\]\]/);
 			if (lm2?.index !== undefined && (!best || lm2.index < best.idx))
 				best = {idx:lm2.index, len:lm2[0].length, fn:()=>{ const s=mk('span','color:#16a34a;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-weight:500'); s.textContent=lm2![1]; s.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();onLinkClick?.(lm2![1]);}); return s; }};
+
+			// Inline image: [[file:img.png]] or [[./img.png]]
+			const fim = r.match(/\[\[(?:file:)?([^\]]+?)\]\]/);
+			if (fim?.index !== undefined && isImagePath(fim[1]) && (!best || fim.index < best.idx))
+				best = {idx:fim.index, len:fim[0].length, fn:()=>{ const img=document.createElement('img'); img.src=resolveImagePath(fim![1]); img.alt=fim![1].split('/').pop()??fim![1]; img.style.cssText='max-width:100%;border-radius:6px;display:inline-block;vertical-align:middle;max-height:300px'; return img; }};
 
 			const bm = r.match(/(^|[\s(])\*(\S[^*]*?\S|\S)\*([\s.,;:!?)]|$)/);
 			if (bm?.index !== undefined) { const off=bm[1].length; const idx=bm.index+off; if(!best||idx<best.idx) best={idx,len:bm[2].length+2,fn:()=>{const b=document.createElement('b');b.textContent=bm![2];return b;}}; }

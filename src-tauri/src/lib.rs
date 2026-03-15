@@ -24,6 +24,7 @@ pub fn run() {
             commands::node::get_forward_links,
             commands::node::export_markdown,
             commands::node::export_html,
+            commands::node::rename_node,
             // Editor
             commands::editor::read_file,
             commands::editor::save_file,

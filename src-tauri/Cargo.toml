@@ -28,3 +28,4 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 rusqlite = { workspace = true }
 notify = "7"
+regex-lite = "0.1"
