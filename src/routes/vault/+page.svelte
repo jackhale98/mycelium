@@ -63,6 +63,7 @@
 		class="flex h-14 shrink-0 items-center gap-2 border-b border-surface-200 px-4 dark:border-surface-700"
 		style="padding-top: var(--safe-area-top)"
 	>
+		<img src="/logo.svg" alt="" class="h-7 w-7 rounded" />
 		<h1 class="text-lg font-semibold">Mycelium</h1>
 		<div class="flex-1"></div>
 		<button onclick={() => (showCreateModal = true)} class="rounded-lg p-2 hover:bg-surface-100 dark:hover:bg-surface-800" aria-label="New node">

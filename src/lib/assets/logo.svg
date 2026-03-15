@@ -1,0 +1,268 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2618"/>
+      <stop offset="100%" stop-color="#111e10"/>
+    </linearGradient>
+    <linearGradient id="w" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#c4882a"/>
+      <stop offset="40%" stop-color="#e0b050"/>
+      <stop offset="100%" stop-color="#f4d58d"/>
+    </linearGradient>
+    <filter id="g">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="a"><feGaussianBlur stdDeviation="22"/></filter>
+    <filter id="lg">
+      <feGaussianBlur stdDeviation="1.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
+  <ellipse cx="258" cy="240" rx="145" ry="180" fill="#f4d58d" opacity="0.03" filter="url(#a)"/>
+
+  <!--
+    FULL CANOPY TREE — coordinate map, no crossings.
+    All paths verified against neighbors.
+
+    TRUNK (continuous):  258,405 → 252,175
+
+    LOWER LEFT:
+    L1: 248,265 (fork on trunk)
+    L2: 185,218 → L3: 152,185
+    L4: 125,210 (droop from L3)
+    L5: 118,160 (up-left from L3)
+    L6: 195,248 (mid-left branch) → L7: 158,268
+
+    LOWER RIGHT:
+    R1: 254,215 (fork on trunk)
+    R2: 315,188 → R3: 355,160
+    R4: 338,215 (sub-droop from R2)
+    R7: 295,155 (shorter right) → R8: 310,128
+
+    UPPER LEFT CANOPY:
+    L8:  168,142 (from L3)
+    LA:  148,118 (from L8, up-left)
+    LB:  138,100 (tip from LA)
+    LC:  188,115 (from L8, up-right into gap)
+    LD:  196,95  (tip from LC)
+    LE:  108,138 (from L5, up)
+    LF:  98,118  (tip from LE)
+
+    CENTRAL TOP:
+    T1: 252,175 (trunk crown)
+    T2: 240,128 (main up-left)
+    T3: 225,95  (tip from T2)
+    T4: 265,140 (up-right from trunk)
+    T5: 272,108 (tip from T4)
+    T6: 248,100 (side from T2)
+    TG: 215,128 (left from T2)
+    TH: 205,115 (tip from TG)
+    TI: 255,82  (tip from T6, continues up)
+    TJ: 215,78  (tip from T3, second fork)
+
+    UPPER RIGHT CANOPY:
+    R5: 375,195 (from R3)
+    R6: 390,148 (from R3)
+    RA: 342,132 (from R3, up-left)
+    RB: 335,108 (tip from RA)
+    RC: 320,105 (from R8, up)
+    RD: 328,86  (tip from RC)
+    RE: 282,132 (from T4, right)
+    RF: 290,115 (tip from RE)
+
+    ROOTS: same as v3
+  -->
+
+  <!-- TRUNK — one continuous path, slight leftward lean -->
+
+<path d="M258,405 C256,375 254,330 248,295 C244,270 250,230 252,200 C253,188 252,180 252,175"
+stroke="url(#w)" stroke-width="6" fill="none" stroke-linecap="round" filter="url(#g)"/>
+
+  <g stroke="url(#w)" fill="none" stroke-linecap="round">
+
+```
+<!-- ═══ LOWER LEFT ═══ -->
+<path d="M248,265 C230,250 210,232 185,218" stroke-width="4" filter="url(#g)"/>
+<path d="M185,218 C172,205 162,195 152,185" stroke-width="3.2"/>
+<path d="M152,185 C140,195 132,204 125,210" stroke-width="2.2" opacity="0.65"/>
+
+
+<!-- ═══ LOWER RIGHT ═══ -->
+<path d="M254,215 C275,205 295,196 315,188" stroke-width="3.5" filter="url(#g)"/>
+<path d="M315,188 C325,198 332,208 338,215" stroke-width="2.2" opacity="0.6"/>
+<path d="M315,188 C330,178 342,168 355,160" stroke-width="2.8"/>
+
+<!-- ═══ UPPER LEFT CANOPY ═══ -->
+
+<!-- L3→L5: up-left from major left fork -->
+<path d="M152,185 C148,175 138,168 118,160" stroke-width="2.2" opacity="0.6"/>
+<!-- L5→LE: continues up from L5 -->
+<path d="M118,160 C114,152 112,145 108,138" stroke-width="1.6" opacity="0.45"/>
+<!-- LE→LF: fine tip -->
+<path d="M108,138 C104,130 100,124 98,118" stroke-width="1.2" opacity="0.3"/>
+<!-- L5→ old tip going left -->
+<path d="M118,160 C108,155 100,150 94,146" stroke-width="1.2" opacity="0.3"/>
+
+<!-- L3→L8: up-right from major left fork -->
+<path d="M152,185 C158,170 164,155 168,142" stroke-width="2.2" opacity="0.6"/>
+<!-- L8→LA: up-left from L8 -->
+<path d="M168,142 C160,132 154,126 148,118" stroke-width="1.8" opacity="0.45"/>
+<!-- LA→LB: fine tip -->
+<path d="M148,118 C144,110 140,105 138,100" stroke-width="1.2" opacity="0.3"/>
+<!-- L8→LC: up-right from L8 into gap toward center -->
+<path d="M168,142 C176,132 182,124 188,115" stroke-width="1.8" opacity="0.45"/>
+<!-- LC→LD: tip -->
+<path d="M188,115 C192,107 194,100 196,95" stroke-width="1.2" opacity="0.3"/>
+
+<!-- ═══ CENTRAL TOP ═══ -->
+
+<!-- T1→T2: main upward from trunk crown -->
+<path d="M252,175 C248,158 244,142 240,128" stroke-width="3" filter="url(#g)"/>
+<!-- T2→TG: left branch from T2 -->
+<path d="M240,128 C230,129 222,128 215,128" stroke-width="1.8" opacity="0.45"/>
+<!-- TG→TH: tip -->
+<path d="M215,128 C210,123 208,118 205,115" stroke-width="1.2" opacity="0.32"/>
+<!-- T2→T3: up-left main continuation -->
+<path d="M240,128 C234,115 230,105 225,95" stroke-width="2.2" opacity="0.55"/>
+<!-- T3→ tip (old) -->
+<path d="M225,95 C218,86 214,80 210,75" stroke-width="1.2" opacity="0.3"/>
+<!-- T3→TJ: second fork from T3, going left -->
+<path d="M225,95 C220,88 218,82 215,78" stroke-width="1.2" opacity="0.3"/>
+<!-- T2→T6: slight right from T2 -->
+<path d="M240,128 C244,118 246,108 248,100" stroke-width="1.6" opacity="0.42"/>
+<!-- T6→TI: continues up -->
+<path d="M248,100 C250,92 252,86 255,82" stroke-width="1.2" opacity="0.3"/>
+
+<!-- T1→T4: right upper from trunk crown area -->
+<path d="M253,182 C258,168 262,155 265,140" stroke-width="2.5" opacity="0.6"/>
+<!-- T4→T5: up from T4 -->
+<path d="M265,140 C268,128 270,118 272,108" stroke-width="1.8" opacity="0.45"/>
+<!-- T5→ tip -->
+<path d="M272,108 C278,98 282,92 288,86" stroke-width="1.2" opacity="0.3"/>
+<!-- T4→RE: right from T4 into gap -->
+<path d="M265,140 C272,138 278,135 282,132" stroke-width="1.6" opacity="0.4"/>
+<!-- RE→RF: tip -->
+<path d="M282,132 C286,125 288,120 290,115" stroke-width="1.2" opacity="0.3"/>
+
+<!-- ═══ UPPER RIGHT CANOPY ═══ -->
+
+<!-- R1→R7: shorter right branch going up -->
+<path d="M253,205 C268,185 280,168 295,155" stroke-width="2.5" opacity="0.7"/>
+<!-- R7→R8 -->
+<path d="M295,155 C302,145 306,138 310,128" stroke-width="1.8" opacity="0.5"/>
+<!-- R8→RC: continues up from R8 -->
+<path d="M310,128 C314,118 318,112 320,105" stroke-width="1.5" opacity="0.4"/>
+<!-- RC→RD: tip -->
+<path d="M320,105 C324,96 326,92 328,86" stroke-width="1.2" opacity="0.3"/>
+
+<!-- R3→R6: right tip -->
+<path d="M355,160 C368,155 380,150 390,148" stroke-width="1.8" opacity="0.5"/>
+<path d="M390,148 C398,146 405,144 412,142" stroke-width="1.2" opacity="0.3"/>
+<!-- R3→R5: down-right droop -->
+<path d="M355,160 C365,172 370,182 375,195" stroke-width="1.8" opacity="0.5"/>
+<!-- R3→RA: up-left from R3 -->
+<path d="M355,160 C350,148 346,140 342,132" stroke-width="2" opacity="0.48"/>
+<!-- RA→RB: tip -->
+<path d="M342,132 C340,122 338,115 335,108" stroke-width="1.4" opacity="0.32"/>
+
+<!-- ═══ FINE TIPS from lower branches ═══ -->
+<path d="M125,210 C115,216 108,220 100,222" stroke-width="1.2" opacity="0.3"/>
+<path d="M338,215 C348,222 356,226 362,230" stroke-width="1.2" opacity="0.3"/>
+```
+
+  </g>
+
+  <!-- ROOTS -->
+
+  <g stroke="url(#w)" fill="none" stroke-linecap="round" opacity="0.38">
+    <path d="M258,405 C240,414 218,422 195,428" stroke-width="3"/>
+    <path d="M258,405 C282,412 306,420 330,425" stroke-width="2.8"/>
+    <path d="M195,428 C175,434 160,438 145,442" stroke-width="2.2"/>
+    <path d="M330,425 C350,432 365,436 378,440" stroke-width="2.2"/>
+    <path d="M145,442 C130,446 118,448 108,450" stroke-width="1.6" opacity="0.7"/>
+    <path d="M195,428 C185,442 178,452 172,460" stroke-width="1.6" opacity="0.7"/>
+    <path d="M330,425 C340,442 348,452 355,458" stroke-width="1.6" opacity="0.7"/>
+    <path d="M378,440 C392,444 402,446 410,448" stroke-width="1.6" opacity="0.7"/>
+  </g>
+
+  <!-- ═══════ NODES ═══════ -->
+
+  <!-- Trunk -->
+
+  <g fill="url(#w)" filter="url(#g)">
+    <circle cx="258" cy="405" r="6"/>
+    <circle cx="248" cy="265" r="5.5"/>
+    <circle cx="254" cy="215" r="5"/>
+    <circle cx="252" cy="175" r="6.5"/>
+  </g>
+
+  <!-- Major branch junctions -->
+
+  <g fill="url(#w)">
+    <circle cx="185" cy="218" r="4.5"/>
+    <circle cx="152" cy="185" r="4"/>
+    <circle cx="315" cy="188" r="4.5"/>
+    <circle cx="355" cy="160" r="4"/>
+    <circle cx="240" cy="128" r="4.5"/>
+    <circle cx="295" cy="155" r="3.8"/>
+    <circle cx="265" cy="140" r="3.8"/>
+    <circle cx="168" cy="142" r="3.8"/>
+  </g>
+
+  <!-- Mid-canopy nodes -->
+
+  <g fill="url(#w)" opacity="0.65">
+    <circle cx="125" cy="210" r="3.2"/>
+    <circle cx="118" cy="160" r="3.2"/>
+    <circle cx="338" cy="215" r="3.2"/>
+    <circle cx="375" cy="195" r="3"/>
+    <circle cx="390" cy="148" r="3"/>
+    <circle cx="310" cy="128" r="3.2"/>
+    <circle cx="225" cy="95" r="3.5"/>
+    <circle cx="272" cy="108" r="3.2"/>
+    <circle cx="248" cy="100" r="3"/>
+    <circle cx="342" cy="132" r="3"/>
+    <circle cx="188" cy="115" r="3"/>
+    <circle cx="148" cy="118" r="3"/>
+    <circle cx="108" cy="138" r="3"/>
+    <circle cx="215" cy="128" r="3"/>
+    <circle cx="320" cy="105" r="3"/>
+    <circle cx="282" cy="132" r="3"/>
+  </g>
+
+  <!-- Leaf tip nodes — varied warm palette -->
+
+  <g filter="url(#lg)">
+    <circle cx="210" cy="75" r="2.8" fill="#e8c35a" opacity="0.55"/>
+    <circle cx="215" cy="78" r="2.5" fill="#d4782e" opacity="0.5"/>
+    <circle cx="255" cy="82" r="2.8" fill="#a8c462" opacity="0.55"/>
+    <circle cx="288" cy="86" r="2.8" fill="#f4d58d" opacity="0.5"/>
+    <circle cx="328" cy="86" r="2.8" fill="#d4952a" opacity="0.55"/>
+    <circle cx="196" cy="95" r="2.8" fill="#c4d478" opacity="0.5"/>
+    <circle cx="138" cy="100" r="2.8" fill="#e0a040" opacity="0.5"/>
+    <circle cx="98" cy="118" r="2.5" fill="#cc6b3a" opacity="0.45"/>
+    <circle cx="335" cy="108" r="2.8" fill="#b8cc68" opacity="0.5"/>
+    <circle cx="290" cy="115" r="2.5" fill="#f0c858" opacity="0.5"/>
+    <circle cx="205" cy="115" r="2.5" fill="#d89038" opacity="0.5"/>
+    <circle cx="94" cy="146" r="2.3" fill="#c8a850" opacity="0.42"/>
+    <circle cx="412" cy="142" r="2.3" fill="#a0b858" opacity="0.45"/>
+    <circle cx="100" cy="222" r="2.3" fill="#d4782e" opacity="0.4"/>
+    <circle cx="362" cy="230" r="2.3" fill="#e8c35a" opacity="0.4"/>
+  </g>
+
+  <!-- Root nodes -->
+
+  <g fill="url(#w)" opacity="0.35">
+    <circle cx="195" cy="428" r="3.5"/>
+    <circle cx="330" cy="425" r="3.5"/>
+    <circle cx="145" cy="442" r="3"/>
+    <circle cx="378" cy="440" r="3"/>
+    <circle cx="108" cy="450" r="2.5"/>
+    <circle cx="172" cy="460" r="2.5"/>
+    <circle cx="355" cy="458" r="2.5"/>
+    <circle cx="410" cy="448" r="2.5"/>
+  </g>
+</svg>

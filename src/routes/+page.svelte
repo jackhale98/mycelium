@@ -66,11 +66,7 @@
 	<div class="w-full max-w-md space-y-8">
 		<!-- Logo & Title -->
 		<div class="text-center">
-			<div
-				class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-mycelium-600 text-3xl font-bold text-white"
-			>
-				M
-			</div>
+			<img src="/logo.svg" alt="Mycelium" class="mx-auto mb-4 h-20 w-20 rounded-2xl" />
 			<h1 class="text-3xl font-bold tracking-tight">Mycelium</h1>
 			<p class="mt-2 text-surface-700 dark:text-surface-300">
 				Open-source Org Roam knowledge base
