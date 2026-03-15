@@ -1,10 +1,7 @@
-use tauri::State;
-use crate::state::AppState;
-
 /// Pick a folder using the native platform picker.
 /// On desktop, uses tauri-plugin-dialog.
-/// On iOS, returns the app's documents directory (folder picker not supported by dialog plugin).
-/// The frontend handles the actual iOS folder picker via a custom approach.
+/// On iOS, uses a custom Swift plugin with UIDocumentPickerViewController.
+/// The frontend calls pick_folder first, then falls back to get_documents_path.
 #[tauri::command]
 pub async fn get_documents_path() -> Result<String, String> {
     // Return the platform-appropriate documents directory

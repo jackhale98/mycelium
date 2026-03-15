@@ -53,11 +53,11 @@ jobs:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri ios init
 
-      - name: Enable iOS document picker support
+      - name: Enable iOS document picker and add Swift plugin
         run: |
+          # Patch Info.plist for document picker support
           PLIST="src-tauri/gen/apple/mycelium_iOS/Info.plist"
           if [ -f "$PLIST" ]; then
-            # Add keys before closing </dict>
             sed -i '' '/<\/dict>/i\
             <key>UIFileSharingEnabled</key>\
             <true/>\
@@ -65,7 +65,17 @@ jobs:
             <true/>\
             <key>UISupportsDocumentBrowser</key>\
             <true/>' "$PLIST"
-            echo "Patched Info.plist with document picker keys"
+            echo "Patched Info.plist"
+          fi
+
+          # Add Swift folder picker plugin as a local package dependency
+          if [ -d "src-tauri/gen/apple" ]; then
+            cd src-tauri/gen/apple
+            # Copy the Swift plugin package
+            cp -r ../../../ios-plugins/folder-picker ./FolderPickerPlugin
+            # Update the Package.swift dependency path
+            sed -i '' 's|path: "../../gen/apple/.tauri/tauri-api"|path: ".tauri/tauri-api"|' FolderPickerPlugin/Package.swift
+            echo "Added FolderPickerPlugin"
           fi
 
       - name: Prepare App Store Connect API key

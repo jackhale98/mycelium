@@ -59,7 +59,17 @@
 
 	async function handlePickFolder() {
 		if (isMobile()) {
-			// On mobile, use our custom folder browser
+			// On iOS/Android: try native folder picker via custom Swift plugin first
+			try {
+				const { invoke } = await import('@tauri-apps/api/core');
+				const result = await invoke<{ path: string | null }>('plugin:folder-picker|pick_folder');
+				if (result?.path) {
+					vaultPath = result.path;
+					return;
+				}
+			} catch {
+				// Swift plugin not available — fall back to folder browser
+			}
 			showFolderBrowser = true;
 			return;
 		}
@@ -75,7 +85,6 @@
 				vaultPath = path;
 			}
 		} catch {
-			// Dialog failed — show folder browser as fallback
 			showFolderBrowser = true;
 		}
 	}
