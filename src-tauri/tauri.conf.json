@@ -1,6 +1,6 @@
 {
   "productName": "Mycelium",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "identifier": "com.mycelium.app",
   "build": {
     "frontendDist": "../build",
