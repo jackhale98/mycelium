@@ -67,20 +67,20 @@
 
 	async function handlePickFolder() {
 		if (isMobile()) {
-			// iOS: try native folder picker via WKWebView bridge
-			const w = window as any;
-			if (w.webkit?.messageHandlers?.folderPicker) {
-				try {
-					const path = await new Promise<string | null>((resolve) => {
-						w.__myceliumFolderPickerCallback = resolve;
-						w.webkit.messageHandlers.folderPicker.postMessage('pick');
-						setTimeout(() => { delete w.__myceliumFolderPickerCallback; resolve(null); }, 60000);
-					});
-					if (path) { vaultPath = path; return; }
-				} catch { /* fall through */ }
+			// iOS/Android: use our custom folder picker plugin
+			// This presents the native UIDocumentPickerViewController with UTType.folder
+			try {
+				const { invoke } = await import('@tauri-apps/api/core');
+				const result = await invoke<{ path: string | null }>('plugin:folder-picker|pick_folder');
+				if (result?.path) {
+					vaultPath = result.path;
+					return;
+				}
+			} catch (e) {
+				console.warn('Folder picker plugin failed:', e);
 			}
 
-			// Fallback: file picker (only grants single file access)
+			// Fallback: file picker (limited to single file access)
 			try {
 				const { open } = await import('@tauri-apps/plugin-dialog');
 				const file = await open({ filters: [{ name: 'Org files', extensions: ['org'] }], multiple: false });
@@ -94,7 +94,7 @@
 			return;
 		}
 
-		// Desktop: native folder picker
+		// Desktop: native folder picker via dialog plugin
 		try {
 			const { open } = await import('@tauri-apps/plugin-dialog');
 			const selected = await open({ directory: true, multiple: false });

@@ -29,3 +29,4 @@ uuid = { workspace = true }
 rusqlite = { workspace = true }
 notify = "7"
 regex-lite = "0.1"
+tauri-plugin-folder-picker = { path = "../tauri-plugin-folder-picker" }

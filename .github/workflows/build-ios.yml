@@ -53,9 +53,8 @@ jobs:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri ios init
 
-      - name: Patch iOS project
+      - name: Patch iOS Info.plist
         run: |
-          # Patch Info.plist for document access
           PLIST="src-tauri/gen/apple/mycelium_iOS/Info.plist"
           if [ -f "$PLIST" ]; then
             sed -i '' '/<\/dict>/i\
@@ -66,14 +65,6 @@ jobs:
             <key>UISupportsDocumentBrowser</key>\
             <true/>' "$PLIST"
             echo "Patched Info.plist"
-          fi
-
-          # Copy Swift folder picker source files into the iOS project
-          IOS_SRC="src-tauri/gen/apple/mycelium_iOS"
-          if [ -d "$IOS_SRC" ]; then
-            cp src-tauri/ios/Sources/*.swift "$IOS_SRC/"
-            echo "Copied Swift files to $IOS_SRC:"
-            ls "$IOS_SRC/"*.swift
           fi
 
       - name: Prepare App Store Connect API key

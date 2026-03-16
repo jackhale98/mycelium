@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/org-parser", "crates/db", "src-tauri"]
+members = ["crates/org-parser", "crates/db", "src-tauri", "tauri-plugin-folder-picker"]
 resolver = "2"
 
 [workspace.package]
