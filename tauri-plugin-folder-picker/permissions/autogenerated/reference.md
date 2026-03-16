@@ -1,10 +1,10 @@
 ## Default Permission
 
-Default permissions for the plugin
+Default permissions for the folder picker plugin
 
 #### This default permission set includes the following:
 
-- `allow-ping`
+- `allow-pick-folder`
 
 ## Permission Table
 
