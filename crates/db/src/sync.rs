@@ -15,9 +15,17 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
     let mut result = SyncResult::default();
 
     // Walk the vault directory for .org files, collecting path + mtime
+    // follow_links(true) ensures symlinks are followed (common in synced vaults)
     let org_files: Vec<(String, String)> = WalkDir::new(vault_path)
+        .follow_links(true)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(|e| match e {
+            Ok(entry) => Some(entry),
+            Err(err) => {
+                eprintln!("walkdir error: {}", err);
+                None
+            }
+        })
         .filter(|e| {
             e.path()
                 .extension()

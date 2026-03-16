@@ -89,7 +89,7 @@
 	function handleBack() {
 		clearTimeout(autoSaveTimer);
 		if (editor.isDirty && editor.filePath) handleSave();
-		navigation.navigateToVault();
+		navigation.goBack();
 	}
 
 	function handleInsertLink(n: NodeRecord) {

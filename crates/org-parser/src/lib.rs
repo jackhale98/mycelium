@@ -344,10 +344,21 @@ pub struct LinkInfo {
 fn extract_links_from_section(section: &Section, links: &mut Vec<LinkInfo>) {
     let source_id = section.headline.id().map(|s| s.to_string());
 
-    // Extract links from body elements
+    // Extract links from ALL body elements (paragraphs, list items, verbatim text)
     for element in &section.body {
         let inline_links = match element {
             Element::Paragraph(p) => link::extract_links_from_content(&p.content),
+            Element::List(l) => {
+                let mut all = Vec::new();
+                for item in &l.items {
+                    all.extend(link::extract_links_from_content(&item.content));
+                }
+                all
+            }
+            Element::Verbatim(_text) => {
+                // Verbatim lines rarely contain links, skip for now
+                Vec::new()
+            }
             _ => Vec::new(),
         };
 

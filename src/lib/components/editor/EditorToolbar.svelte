@@ -79,6 +79,13 @@
 			document.removeEventListener('focusout', onFocusOut);
 		};
 	});
+
+	// Popup positioning: when keyboard is open (toolbar fixed), popups must also be fixed
+	const popupStyle = $derived(
+		keyboardOffset > 0
+			? `position:fixed;bottom:${keyboardOffset + 48}px;left:8px;right:8px;`
+			: 'position:absolute;bottom:100%;left:0;'
+	);
 </script>
 
 {#if editor.hasFile}
@@ -97,7 +104,7 @@
 			<button onclick={() => (showHeadingPicker = !showHeadingPicker)} title="Heading" class="flex h-9 min-w-[40px] items-center justify-center rounded-md text-xs font-bold text-surface-700 hover:bg-surface-200 active:bg-surface-300 dark:text-surface-300 dark:hover:bg-surface-700">H</button>
 			{#if showHeadingPicker}
 				<button class="fixed inset-0 z-20" onclick={() => (showHeadingPicker = false)} aria-label="Close"></button>
-				<div class="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-lg border border-surface-200 bg-surface-0 p-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
+				<div style="{popupStyle}" class="z-[60] mb-1 flex gap-0.5 rounded-lg border border-surface-200 bg-surface-0 p-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
 					{#each [1,2,3,4] as lvl}
 						<button onclick={() => { onHeading?.(lvl); showHeadingPicker = false; }} class="flex h-8 w-8 items-center justify-center rounded text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800">H{lvl}</button>
 					{/each}
@@ -110,7 +117,7 @@
 			<button onclick={() => (showTodoPicker = !showTodoPicker)} title="Set TODO state" class="flex h-9 min-w-[44px] items-center justify-center rounded-md text-[10px] font-bold text-red-600 hover:bg-surface-200 dark:text-red-400 dark:hover:bg-surface-700">TODO</button>
 			{#if showTodoPicker}
 				<button class="fixed inset-0 z-20" onclick={() => (showTodoPicker = false)} aria-label="Close"></button>
-				<div class="absolute bottom-full left-0 z-30 mb-1 min-w-[120px] rounded-lg border border-surface-200 bg-surface-0 py-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
+				<div style="{popupStyle}" class="z-[60] mb-1 min-w-[120px] rounded-lg border border-surface-200 bg-surface-0 py-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
 					<button onclick={() => { onTodo?.(null); showTodoPicker = false; }} class="flex w-full px-3 py-1.5 text-xs hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#6b7280">None</button>
 					{#each orgConfig.todoKeywords as kw}
 						<button onclick={() => { onTodo?.(kw); showTodoPicker = false; }} class="flex w-full px-3 py-1.5 text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#dc2626">{kw}</button>
@@ -127,7 +134,7 @@
 			<button onclick={() => (showPrioPicker = !showPrioPicker)} title="Set priority" class="flex h-9 min-w-[36px] items-center justify-center rounded-md text-[10px] font-bold text-amber-600 hover:bg-surface-200 dark:text-amber-400 dark:hover:bg-surface-700">[#]</button>
 			{#if showPrioPicker}
 				<button class="fixed inset-0 z-20" onclick={() => (showPrioPicker = false)} aria-label="Close"></button>
-				<div class="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-lg border border-surface-200 bg-surface-0 p-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
+				<div style="{popupStyle}" class="z-[60] mb-1 flex gap-0.5 rounded-lg border border-surface-200 bg-surface-0 p-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
 					<button onclick={() => { onPriority?.(null); showPrioPicker = false; }} class="flex h-8 w-8 items-center justify-center rounded text-[10px] hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#6b7280">--</button>
 					{#each orgConfig.priorities as p}
 						<button onclick={() => { onPriority?.(p); showPrioPicker = false; }} class="flex h-8 w-8 items-center justify-center rounded text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#ea580c">#{p}</button>
@@ -157,7 +164,7 @@
 			<button onclick={() => (showTablePicker = !showTablePicker)} title="Table" class="flex h-9 min-w-[36px] items-center justify-center rounded-md font-mono text-[10px] text-surface-700 hover:bg-surface-200 dark:text-surface-300 dark:hover:bg-surface-700">|T|</button>
 			{#if showTablePicker}
 				<button class="fixed inset-0 z-20" onclick={() => (showTablePicker = false)} aria-label="Close"></button>
-				<div class="absolute bottom-full left-0 z-30 mb-1 rounded-lg border border-surface-200 bg-surface-0 p-2 shadow-lg dark:border-surface-700 dark:bg-surface-900">
+				<div style="{popupStyle}" class="z-[60] mb-1 rounded-lg border border-surface-200 bg-surface-0 p-2 shadow-lg dark:border-surface-700 dark:bg-surface-900">
 					<p class="mb-1 text-center text-[10px] text-surface-700 dark:text-surface-300">{hoverRow > 0 ? `${hoverRow} x ${hoverCol}` : 'Select size'}</p>
 					<div class="grid grid-cols-5 gap-0.5">
 						{#each Array(5) as _, r}
