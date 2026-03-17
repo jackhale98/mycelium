@@ -1,4 +1,4 @@
-use org_parser::{self, extract_links, extract_nodes, metadata};
+use org_parser::{self, extract_nodes, metadata};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
@@ -98,16 +98,10 @@ pub fn index_file(conn: &Connection, file_path: &str, content: &str) -> rusqlite
         }
     }
 
-    // Extract and insert links
-    let links = extract_links(&doc);
-    for link in &links {
-        if let Some(ref source_id) = link.source_id {
-            tx.execute(
-                "INSERT INTO links (pos, source, dest, type, properties) VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![link.pos, source_id, link.dest, link.link_type, "{}"],
-            )?;
-        }
-    }
+    // Extract links by scanning raw content with regex — catches ALL [[id:...]] links
+    // regardless of which CST element they're in (paragraphs, lists, verbatim, preamble)
+    let file_node_id = doc.file_id().map(|s| s.to_string());
+    extract_and_insert_links(&tx, file_path, content, &nodes, &file_node_id)?;
 
     // Update files_fts for full-text body search
     let body = strip_org_markup(content);
@@ -252,6 +246,65 @@ fn extract_timestamp_raw(line: &str, keyword: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Extract all [[id:...]] links from raw content using regex.
+/// Associates each link with the nearest node (by :ID:) that appears before it in the file.
+fn extract_and_insert_links(
+    tx: &rusqlite::Transaction,
+    _file_path: &str,
+    content: &str,
+    _nodes: &[org_parser::NodeInfo],
+    _file_node_id: &Option<String>,
+) -> rusqlite::Result<()> {
+    // Build a map of byte positions to node IDs by finding :ID: in the raw content
+    let mut id_positions: Vec<(usize, String)> = Vec::new();
+    let id_re = regex_lite::Regex::new(r":ID:\s+(\S+)").unwrap();
+    for m in id_re.captures_iter(content) {
+        if let Some(id_match) = m.get(1) {
+            id_positions.push((m.get(0).unwrap().start(), id_match.as_str().to_string()));
+        }
+    }
+    id_positions.sort_by_key(|&(pos, _)| pos);
+
+    // Find all [[id:xxx]] and [[id:xxx][desc]] links in the raw text
+    let link_re = regex_lite::Regex::new(r"\[\[id:([^\]]+?)(?:\]\[[^\]]*?)?\]\]").unwrap();
+
+    for m in link_re.find_iter(content) {
+        let link_text = m.as_str();
+        let link_pos = m.start();
+
+        // Extract the target ID
+        let dest = if let Some(caps) = regex_lite::Regex::new(r"\[\[id:([^\]\[]+)")
+            .unwrap()
+            .captures(link_text)
+        {
+            caps.get(1).map(|m| m.as_str().to_string())
+        } else {
+            None
+        };
+
+        let Some(dest) = dest else { continue };
+
+        // Find the source node: the node whose :ID: position is closest before this link
+        let source_id = id_positions
+            .iter()
+            .rev()
+            .find(|(pos, _)| *pos <= link_pos)
+            .map(|(_, id)| id.as_str());
+
+        if let Some(source_id) = source_id {
+            if source_id == dest {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO links (pos, source, dest, type, properties) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![link_pos as i64, source_id, dest, "id", "{}"],
+            )?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Strip org markup to produce plain text for FTS indexing
