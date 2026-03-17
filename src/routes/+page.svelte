@@ -19,9 +19,23 @@
 		}
 	});
 
+	/** Restore iOS security-scoped bookmark access before opening vault */
+	async function restoreIOSAccess(): Promise<void> {
+		if (!isMobile()) return;
+		try {
+			const { invoke } = await import('@tauri-apps/api/core');
+			const result = await invoke<{ path: string | null }>('plugin:folder-picker|restore_access');
+			console.log('[Mycelium] Restored iOS access:', result?.path);
+		} catch (e) {
+			console.warn('[Mycelium] restore_access failed (non-fatal):', e);
+		}
+	}
+
 	async function autoOpen(path: string) {
 		autoOpening = true;
 		try {
+			// On iOS, restore security-scoped bookmark access before syncing
+			await restoreIOSAccess();
 			const syncResult = await openVault(path);
 			const files = await listFiles();
 			const nodes = await listNodes();
@@ -39,6 +53,8 @@
 		isLoading = true;
 		error = null;
 		try {
+			// Restore iOS security-scoped access before syncing
+			await restoreIOSAccess();
 			const syncResult = await openVault(vaultPath.trim());
 			const files = await listFiles();
 			const nodes = await listNodes();
@@ -48,6 +64,11 @@
 				error = 'No .org files found. On iOS, the app may not have access to this folder. Try placing your vault in the Mycelium Documents folder (accessible via Files app → On My iPhone → Mycelium).';
 				isLoading = false;
 				return;
+			}
+
+			// Surface any walk errors for debugging
+			if (syncResult.walk_errors?.length > 0) {
+				console.warn('[Mycelium] Walk errors during sync:', syncResult.walk_errors);
 			}
 
 			vault.setVault(vaultPath.trim(), files, nodes, syncResult);

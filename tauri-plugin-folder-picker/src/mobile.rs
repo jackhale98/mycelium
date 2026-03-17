@@ -36,4 +36,13 @@ impl<R: Runtime> FolderPicker<R> {
             None => Ok(PickFolderResponse { path: None }),
         }
     }
+
+    pub fn restore_access(&self) -> crate::Result<PickFolderResponse> {
+        match &self.0 {
+            Some(handle) => handle
+                .run_mobile_plugin("restoreAccess", ())
+                .map_err(Into::into),
+            None => Ok(PickFolderResponse { path: None }),
+        }
+    }
 }

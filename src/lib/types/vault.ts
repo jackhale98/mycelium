@@ -10,4 +10,5 @@ export interface SyncResult {
 	indexed: number;
 	skipped: number;
 	removed: number;
+	walk_errors?: string[];
 }

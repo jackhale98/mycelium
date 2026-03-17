@@ -16,33 +16,33 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
 
     // Walk the vault directory for .org files, collecting path + mtime
     // follow_links(true) ensures symlinks are followed (common in synced vaults)
-    let org_files: Vec<(String, String)> = WalkDir::new(vault_path)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| match e {
-            Ok(entry) => Some(entry),
+    let mut org_files: Vec<(String, String)> = Vec::new();
+    for entry_result in WalkDir::new(vault_path).follow_links(true).into_iter() {
+        match entry_result {
             Err(err) => {
-                eprintln!("walkdir error: {}", err);
-                None
+                let msg = format!("walkdir: {}", err);
+                eprintln!("{}", msg);
+                result.walk_errors.push(msg);
+                continue;
             }
-        })
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|ext| ext == "org")
-                .unwrap_or(false)
-        })
-        .filter(|e| e.file_type().is_file())
-        .filter_map(|e| {
-            let path = e.path().to_string_lossy().to_string();
-            let mtime = e.metadata().ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs().to_string())
-                .unwrap_or_default();
-            Some((path, mtime))
-        })
-        .collect();
+            Ok(entry) => {
+                if !entry.file_type().is_file() { continue; }
+                let is_org = entry.path()
+                    .extension()
+                    .map(|ext| ext == "org")
+                    .unwrap_or(false);
+                if !is_org { continue; }
+
+                let path = entry.path().to_string_lossy().to_string();
+                let mtime = entry.metadata().ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs().to_string())
+                    .unwrap_or_default();
+                org_files.push((path, mtime));
+            }
+        }
+    }
 
     let current_files: HashSet<String> = org_files.iter().map(|(p, _)| p.clone()).collect();
 
@@ -157,6 +157,9 @@ pub struct SyncResult {
     pub indexed: usize,
     pub skipped: usize,
     pub removed: usize,
+    /// Any non-fatal errors encountered during directory walking (e.g. permission denied)
+    #[serde(default)]
+    pub walk_errors: Vec<String>,
 }
 
 #[derive(Debug)]

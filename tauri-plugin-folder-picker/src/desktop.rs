@@ -17,4 +17,9 @@ impl<R: Runtime> FolderPicker<R> {
         // On desktop, return None — the frontend uses tauri-plugin-dialog instead
         Ok(PickFolderResponse { path: None })
     }
+
+    pub fn restore_access(&self) -> crate::Result<PickFolderResponse> {
+        // On desktop, no security-scoped access needed
+        Ok(PickFolderResponse { path: None })
+    }
 }
