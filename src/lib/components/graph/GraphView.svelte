@@ -10,7 +10,7 @@
 		type SimulationNodeDatum,
 	} from 'd3-force';
 	import { select } from 'd3-selection';
-	import { zoom } from 'd3-zoom';
+	import { zoom, zoomIdentity } from 'd3-zoom';
 	import type { GraphData } from '$lib/types/node';
 
 	let { data }: { data: GraphData } = $props();
@@ -65,9 +65,24 @@
 	}
 
 	export function resetZoom() {
-		if (svgElement && zoomBehavior) {
-			select(svgElement).transition().duration(500).call(zoomBehavior.scaleTo, 1);
-		}
+		if (!svgElement || !zoomBehavior) return;
+		const g = select(svgElement).select('g');
+		const gNode = g.node() as SVGGElement | null;
+		if (!gNode) return;
+		const bbox = gNode.getBBox();
+		if (bbox.width === 0 || bbox.height === 0) return;
+		const svgW = svgElement.clientWidth;
+		const svgH = svgElement.clientHeight;
+		const padding = 40;
+		const scale = Math.min(
+			(svgW - padding * 2) / bbox.width,
+			(svgH - padding * 2) / bbox.height,
+			2 // max scale
+		);
+		const tx = svgW / 2 - (bbox.x + bbox.width / 2) * scale;
+		const ty = svgH / 2 - (bbox.y + bbox.height / 2) * scale;
+		const transform = zoomIdentity.translate(tx, ty).scale(scale);
+		select(svgElement).transition().duration(500).call(zoomBehavior.transform, transform);
 	}
 
 	onMount(() => {

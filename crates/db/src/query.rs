@@ -465,8 +465,8 @@ pub fn get_graph_data(conn: &Connection) -> rusqlite::Result<GraphData> {
 
 /// Find a daily note node by date string (YYYY-MM-DD)
 pub fn find_daily_note(conn: &Connection, date: &str) -> rusqlite::Result<Option<NodeRecord>> {
-    // Look for a node whose title matches the date, or whose file contains the date
-    conn.query_row(
+    // First try: node whose title matches the date
+    let node = conn.query_row(
         "SELECT id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp
          FROM nodes
          WHERE title = ?1 OR title LIKE ?2
@@ -488,15 +488,58 @@ pub fn find_daily_note(conn: &Connection, date: &str) -> rusqlite::Result<Option
             })
         },
     )
+    .optional()?;
+
+    if node.is_some() {
+        return Ok(node);
+    }
+
+    // Fallback: file in daily/ whose name contains the date
+    conn.query_row(
+        "SELECT 'file:' || file, file, 0, 0, NULL, NULL, NULL, NULL,
+                COALESCE(title, ?1), NULL, NULL
+         FROM files
+         WHERE file LIKE ?2
+         LIMIT 1",
+        rusqlite::params![date, format!("%{date}%.org")],
+        |row| {
+            Ok(NodeRecord {
+                id: row.get(0)?,
+                file: row.get(1)?,
+                level: row.get(2)?,
+                pos: row.get(3)?,
+                todo: row.get(4)?,
+                priority: row.get(5)?,
+                scheduled: row.get(6)?,
+                deadline: row.get(7)?,
+                title: row.get(8)?,
+                properties: row.get(9)?,
+                olp: row.get(10)?,
+            })
+        },
+    )
     .optional()
 }
 
-/// List daily notes (nodes whose titles look like dates, sorted recent first)
+/// List daily notes — finds both:
+/// 1. Nodes whose titles look like dates (org-roam nodes with :ID:)
+/// 2. Files whose names look like dates (daily/ files without :ID:)
 pub fn list_daily_notes(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp
          FROM nodes
          WHERE title GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'
+         UNION
+         SELECT
+           'file:' || file AS id, file, 0 AS level, 0 AS pos,
+           NULL AS todo, NULL AS priority, NULL AS scheduled, NULL AS deadline,
+           COALESCE(title, REPLACE(REPLACE(file, RTRIM(file, REPLACE(file, '/', '')), ''), '.org', '')) AS title,
+           NULL AS properties, NULL AS olp
+         FROM files
+         WHERE (file LIKE '%/daily/%' OR file LIKE '%/dailies/%')
+           AND file LIKE '%.org'
+           AND file NOT IN (SELECT f.file FROM nodes n JOIN files f ON n.file = f.file
+                            WHERE n.title GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*')
          ORDER BY title DESC
          LIMIT 100",
     )?;

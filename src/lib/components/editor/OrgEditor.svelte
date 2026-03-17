@@ -142,32 +142,33 @@
 
 	export function insertAtCursor(text: string) {
 		if (!view) return;
+		view.focus();
 		const { from } = view.state.selection.main;
 		view.dispatch({ changes: { from, insert: text } });
-		view.focus();
 	}
 
 	export function wrapSelection(before: string, after: string) {
 		if (!view) return;
+		view.focus();
 		const { from, to } = view.state.selection.main;
 		const selected = view.state.sliceDoc(from, to);
 		view.dispatch({
 			changes: { from, to, insert: `${before}${selected}${after}` },
 			selection: { anchor: from + before.length, head: to + before.length },
 		});
-		view.focus();
 	}
 
 	export function insertLinePrefix(prefix: string) {
 		if (!view) return;
+		view.focus();
 		const { from } = view.state.selection.main;
 		const line = view.state.doc.lineAt(from);
 		view.dispatch({ changes: { from: line.from, insert: prefix } });
-		view.focus();
 	}
 
 	export function insertHeadingWithId(level: number = 2) {
 		if (!view) return;
+		view.focus();
 		const { from } = view.state.selection.main;
 		const line = view.state.doc.lineAt(from);
 		const id = crypto.randomUUID();
@@ -177,7 +178,6 @@
 			changes: { from: line.to, insert: text },
 			selection: { anchor: line.to + 1 + level + 1 },
 		});
-		view.focus();
 	}
 
 	function handleFallbackInput(e: Event) {
