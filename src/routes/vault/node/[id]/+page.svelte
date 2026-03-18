@@ -82,6 +82,22 @@
 			srcblock: () => onSrcBlock(),
 			quote: () => onQuote(),
 			timestamp: () => onTimestamp(),
+			tag: () => onTag(),
+			tagSet: (tag: string) => toggleTag(tag),
+			/** Return current filetags as JSON for native picker */
+			getFiletags: (): string => {
+				const lines = editor.content.split('\n');
+				for (const line of lines) {
+					if (/^\*/.test(line)) break; // stop at first heading
+					const m = line.match(/^#\+FILETAGS:\s*(.*)/i);
+					if (m) {
+						const raw = m[1].trim();
+						const tags = raw.split(':').filter(t => t.length > 0);
+						return JSON.stringify(tags);
+					}
+				}
+				return '[]';
+			},
 			/** Return existing date string for pre-selection in native date picker */
 			getExisting: (type: string): string => {
 				const lines = editor.content.split('\n');
@@ -204,6 +220,51 @@
 			}
 			const id = crypto.randomUUID();
 			lines.splice(insertAt + 1, 0, ':PROPERTIES:', `:ID: ${id}`, ':END:');
+			return lines.join('\n');
+		});
+	}
+
+	// ── Tags ──────────────────────────────────────────────────
+
+	function onTag() {
+		// Fallback for web: prompt for tag name
+		const tag = prompt('Enter tag name:');
+		if (tag?.trim()) toggleTag(tag.trim());
+	}
+
+	/** Toggle a tag in the #+FILETAGS: line */
+	function toggleTag(tag: string) {
+		modifyContent(content => {
+			const lines = content.split('\n');
+			let filetagsIdx = -1;
+			for (let i = 0; i < lines.length; i++) {
+				if (/^\*/.test(lines[i])) break;
+				if (/^#\+FILETAGS:/i.test(lines[i])) { filetagsIdx = i; break; }
+			}
+
+			if (filetagsIdx >= 0) {
+				// Parse existing tags
+				const m = lines[filetagsIdx].match(/^#\+FILETAGS:\s*(.*)/i);
+				const raw = m ? m[1].trim() : '';
+				const tags = raw.split(':').filter(t => t.length > 0);
+				const idx = tags.indexOf(tag);
+				if (idx >= 0) {
+					tags.splice(idx, 1); // remove
+				} else {
+					tags.push(tag); // add
+				}
+				lines[filetagsIdx] = tags.length > 0
+					? `#+FILETAGS: :${tags.join(':')}:`
+					: `#+FILETAGS:`;
+			} else {
+				// No #+FILETAGS: line yet — insert after #+TITLE: or at top
+				let insertAt = 0;
+				for (let i = 0; i < lines.length; i++) {
+					if (/^\*/.test(lines[i])) break;
+					if (/^#\+/i.test(lines[i])) insertAt = i + 1;
+				}
+				lines.splice(insertAt, 0, `#+FILETAGS: :${tag}:`);
+			}
 			return lines.join('\n');
 		});
 	}

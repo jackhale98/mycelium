@@ -16,8 +16,9 @@
 		};
 		mq.addEventListener('change', handler);
 
-		// Expose orgConfig to native toolbar pickers (iOS + Android)
+		// Expose orgConfig and vault tags to native toolbar pickers (iOS + Android)
 		(window as any).__myceliumOrgConfig = orgConfig;
+		loadVaultTags();
 
 		// Install native keyboard toolbar (iOS + Android)
 		setupNativeToolbar();
@@ -25,8 +26,17 @@
 		return () => {
 			mq.removeEventListener('change', handler);
 			delete (window as any).__myceliumOrgConfig;
+			delete (window as any).__myceliumVaultTags;
 		};
 	});
+
+	async function loadVaultTags() {
+		try {
+			const { invoke } = await import('@tauri-apps/api/core');
+			const tags = await invoke('get_all_tags');
+			(window as any).__myceliumVaultTags = tags;
+		} catch { /* not fatal — tags just won't appear in picker */ }
+	}
 
 	async function setupNativeToolbar() {
 		if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) return;

@@ -55,6 +55,7 @@ class KeyboardToolbar: UIView {
             ("ID", "makeNode", .systemPurple, true, 32),
             ("TODO", "todo", .systemRed, true, 48),
             ("[#]", "priority", .systemOrange, true, 38),
+            ("Tag", "tag", .systemTeal, true, 38),
             ("DL", "deadline", .systemRed, false, 32),
             ("SC", "scheduled", .systemBlue, false, 32),
             ("|", "", nil, false, 1),
@@ -119,6 +120,8 @@ class KeyboardToolbar: UIView {
             showHeadingPicker(from: sender)
         case "priority":
             showPriorityPicker(from: sender)
+        case "tag":
+            showTagPicker(from: sender)
         case "deadline":
             showDatePicker(for: "deadline", from: sender)
         case "scheduled":
@@ -216,6 +219,69 @@ class KeyboardToolbar: UIView {
                     popover.sourceRect = sender.bounds
                 }
                 self.presentAlert(alert)
+            }
+        }
+    }
+
+    private func showTagPicker(from sender: UIButton) {
+        // Get current file tags and all vault tags
+        let jsFiletags = "window.__myceliumToolbar?.getFiletags?.() ?? '[]'"
+        let jsAllTags = "JSON.stringify((window.__myceliumVaultTags ?? []).map(t => t.tag || t))"
+
+        webView?.evaluateJavaScript(jsFiletags) { [weak self] fileResult, _ in
+            guard let self = self else { return }
+            self.webView?.evaluateJavaScript(jsAllTags) { [weak self] allResult, _ in
+                guard let self = self else { return }
+
+                var currentTags: [String] = []
+                var allTags: [String] = []
+
+                if let jsonStr = fileResult as? String,
+                   let data = try? JSONSerialization.jsonObject(with: Data(jsonStr.utf8)) as? [String] {
+                    currentTags = data
+                }
+                if let jsonStr = allResult as? String,
+                   let data = try? JSONSerialization.jsonObject(with: Data(jsonStr.utf8)) as? [String] {
+                    allTags = data
+                }
+
+                // Merge: current tags first, then any vault tags not already present
+                var displayTags = currentTags
+                for t in allTags {
+                    if !displayTags.contains(t) { displayTags.append(t) }
+                }
+
+                DispatchQueue.main.async {
+                    let alert = UIAlertController(title: "File Tags", message: "Tap to toggle, or add new", preferredStyle: .actionSheet)
+
+                    for tag in displayTags {
+                        let isActive = currentTags.contains(tag)
+                        let title = isActive ? "✓ \(tag)" : "  \(tag)"
+                        alert.addAction(UIAlertAction(title: title, style: .default) { _ in
+                            self.webView?.evaluateJavaScript("window.__myceliumToolbar?.tagSet('\(tag)')", completionHandler: nil)
+                        })
+                    }
+
+                    alert.addAction(UIAlertAction(title: "+ Add New Tag", style: .default) { _ in
+                        let input = UIAlertController(title: "New Tag", message: nil, preferredStyle: .alert)
+                        input.addTextField { $0.placeholder = "tag name" }
+                        input.addAction(UIAlertAction(title: "Add", style: .default) { _ in
+                            if let tag = input.textFields?.first?.text?.trimmingCharacters(in: .whitespaces), !tag.isEmpty {
+                                self.webView?.evaluateJavaScript("window.__myceliumToolbar?.tagSet('\(tag)')", completionHandler: nil)
+                            }
+                        })
+                        input.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+                        self.presentAlert(input)
+                    })
+
+                    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+                    if let popover = alert.popoverPresentationController {
+                        popover.sourceView = sender
+                        popover.sourceRect = sender.bounds
+                    }
+                    self.presentAlert(alert)
+                }
             }
         }
     }

@@ -126,6 +126,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
             BtnDef("ID", "makeNode", Color.parseColor("#9333ea"), true),
             BtnDef("TODO", "todo", Color.parseColor("#dc2626"), true),
             BtnDef("[#]", "priority", Color.parseColor("#ea580c"), true),
+            BtnDef("Tag", "tag", Color.parseColor("#0d9488"), true),
             BtnDef("DL", "deadline", Color.parseColor("#dc2626")),
             BtnDef("SC", "scheduled", Color.parseColor("#2563eb")),
             BtnDef("|", ""),
@@ -189,6 +190,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
             "todo" -> showTodoPicker(wv)
             "heading" -> showHeadingPicker(wv)
             "priority" -> showPriorityPicker(wv)
+            "tag" -> showTagPicker(wv)
             "deadline" -> showDatePicker("deadline", wv)
             "scheduled" -> showDatePicker("scheduled", wv)
             else -> {
@@ -275,6 +277,67 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
                     }
                     .setNegativeButton("Cancel", null)
                     .create().show()
+            }
+        }
+    }
+
+    private fun showTagPicker(wv: WebView) {
+        val jsFiletags = "window.__myceliumToolbar?.getFiletags?.() ?? '[]'"
+        val jsAllTags = "JSON.stringify((window.__myceliumVaultTags ?? []).map(t => t.tag || t))"
+        wv.evaluateJavascript(jsFiletags) { fileResult ->
+            wv.evaluateJavascript(jsAllTags) { allResult ->
+                Handler(Looper.getMainLooper()).post {
+                    var currentTags = mutableListOf<String>()
+                    var allTags = mutableListOf<String>()
+                    try {
+                        val fileStr = fileResult?.trim('"')?.replace("\\\"", "\"")?.replace("\\\\", "\\") ?: "[]"
+                        currentTags = jsonArrayToList(JSONArray(fileStr))?.toMutableList() ?: mutableListOf()
+                    } catch (_: Exception) {}
+                    try {
+                        val allStr = allResult?.trim('"')?.replace("\\\"", "\"")?.replace("\\\\", "\\") ?: "[]"
+                        allTags = jsonArrayToList(JSONArray(allStr))?.toMutableList() ?: mutableListOf()
+                    } catch (_: Exception) {}
+
+                    // Merge: current first, then vault tags not already present
+                    val displayTags = currentTags.toMutableList()
+                    for (t in allTags) {
+                        if (!displayTags.contains(t)) displayTags.add(t)
+                    }
+
+                    val items = displayTags.map { tag ->
+                        if (currentTags.contains(tag)) "✓ $tag" else "  $tag"
+                    }.toMutableList()
+                    items.add("+ Add New Tag")
+
+                    AlertDialog.Builder(activity)
+                        .setTitle("File Tags")
+                        .setItems(items.toTypedArray()) { dialog, which ->
+                            if (which < displayTags.size) {
+                                val tag = displayTags[which]
+                                wv.evaluateJavascript("window.__myceliumToolbar?.tagSet('$tag')", null)
+                            } else {
+                                // Add new tag
+                                val input = android.widget.EditText(activity).apply {
+                                    hint = "tag name"
+                                    setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
+                                }
+                                AlertDialog.Builder(activity)
+                                    .setTitle("New Tag")
+                                    .setView(input)
+                                    .setPositiveButton("Add") { _, _ ->
+                                        val tag = input.text.toString().trim()
+                                        if (tag.isNotEmpty()) {
+                                            wv.evaluateJavascript("window.__myceliumToolbar?.tagSet('$tag')", null)
+                                        }
+                                    }
+                                    .setNegativeButton("Cancel", null)
+                                    .create().show()
+                            }
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .create().show()
+                }
             }
         }
     }
