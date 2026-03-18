@@ -220,50 +220,33 @@ class KeyboardToolbar: UIView {
     }
 
     private func showDatePicker(for type: String, from sender: UIButton) {
-        let alert = UIAlertController(title: type == "deadline" ? "Set Deadline" : "Set Scheduled", message: "\n\n\n\n\n\n\n\n\n", preferredStyle: .actionSheet)
-
-        let datePicker = UIDatePicker()
-        datePicker.datePickerMode = .date
-        datePicker.preferredDatePickerStyle = .inline
-        datePicker.translatesAutoresizingMaskIntoConstraints = false
-        alert.view.addSubview(datePicker)
-
-        NSLayoutConstraint.activate([
-            datePicker.leadingAnchor.constraint(equalTo: alert.view.leadingAnchor, constant: 8),
-            datePicker.trailingAnchor.constraint(equalTo: alert.view.trailingAnchor, constant: -8),
-            datePicker.topAnchor.constraint(equalTo: alert.view.topAnchor, constant: 50),
-        ])
-
-        // Resize the alert to fit the date picker
-        let height = NSLayoutConstraint(item: alert.view!, attribute: .height, relatedBy: .equal, toItem: nil, attribute: .notAnAttribute, multiplier: 1, constant: 480)
-        alert.view.addConstraint(height)
-
-        alert.addAction(UIAlertAction(title: "Set", style: .default) { [weak self] _ in
-            let date = datePicker.date
+        let vc = DatePickerViewController()
+        vc.titleText = type == "deadline" ? "Set Deadline" : "Set Scheduled"
+        vc.onDateSelected = { [weak self] date in
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd"
             let dateStr = formatter.string(from: date)
-
             let dayFormatter = DateFormatter()
             dayFormatter.dateFormat = "EEE"
             let dayStr = dayFormatter.string(from: date)
-
-            // Format as org timestamp: <2024-01-15 Mon>
             let timestamp = "<\(dateStr) \(dayStr)>"
             let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
             self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)('\(timestamp)')", completionHandler: nil)
-        })
-        alert.addAction(UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
+        }
+        vc.onRemove = { [weak self] in
             let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
             self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)(null)", completionHandler: nil)
-        })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-
-        if let popover = alert.popoverPresentationController {
-            popover.sourceView = sender
-            popover.sourceRect = sender.bounds
         }
-        presentAlert(alert)
+        vc.modalPresentationStyle = .pageSheet
+        if let sheet = vc.sheetPresentationController {
+            sheet.detents = [.medium()]
+            sheet.prefersGrabberIndicator = true
+        }
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootVC = scene.windows.first?.rootViewController else { return }
+        var topVC = rootVC
+        while let presented = topVC.presentedViewController { topVC = presented }
+        topVC.present(vc, animated: true)
     }
 
     private func presentAlert(_ alert: UIAlertController) {
@@ -329,5 +312,92 @@ class KeyboardToolbar: UIView {
             }
         }
         return nil
+    }
+}
+
+// MARK: - Date Picker View Controller
+
+/// A proper modal view controller with a UIDatePicker, Set/Remove/Cancel buttons.
+/// Presented as a half-sheet so nothing overlaps.
+class DatePickerViewController: UIViewController {
+    var titleText: String = "Pick a Date"
+    var onDateSelected: ((Date) -> Void)?
+    var onRemove: (() -> Void)?
+
+    private let datePicker = UIDatePicker()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+
+        // Title label
+        let titleLabel = UILabel()
+        titleLabel.text = titleText
+        titleLabel.font = .boldSystemFont(ofSize: 17)
+        titleLabel.textAlignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(titleLabel)
+
+        // Date picker
+        datePicker.datePickerMode = .date
+        datePicker.preferredDatePickerStyle = .inline
+        datePicker.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(datePicker)
+
+        // Button stack
+        let setBtn = UIButton(type: .system)
+        setBtn.setTitle("Set Date", for: .normal)
+        setBtn.titleLabel?.font = .boldSystemFont(ofSize: 17)
+        setBtn.backgroundColor = .systemGreen
+        setBtn.setTitleColor(.white, for: .normal)
+        setBtn.layer.cornerRadius = 10
+        setBtn.addTarget(self, action: #selector(setTapped), for: .touchUpInside)
+
+        let removeBtn = UIButton(type: .system)
+        removeBtn.setTitle("Remove", for: .normal)
+        removeBtn.titleLabel?.font = .systemFont(ofSize: 15)
+        removeBtn.setTitleColor(.systemRed, for: .normal)
+        removeBtn.addTarget(self, action: #selector(removeTapped), for: .touchUpInside)
+
+        let cancelBtn = UIButton(type: .system)
+        cancelBtn.setTitle("Cancel", for: .normal)
+        cancelBtn.titleLabel?.font = .systemFont(ofSize: 15)
+        cancelBtn.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+
+        let btnStack = UIStackView(arrangedSubviews: [setBtn, removeBtn, cancelBtn])
+        btnStack.axis = .horizontal
+        btnStack.distribution = .fillEqually
+        btnStack.spacing = 12
+        btnStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(btnStack)
+
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            datePicker.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            datePicker.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            datePicker.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+
+            btnStack.topAnchor.constraint(equalTo: datePicker.bottomAnchor, constant: 8),
+            btnStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            btnStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            btnStack.heightAnchor.constraint(equalToConstant: 44),
+        ])
+    }
+
+    @objc private func setTapped() {
+        onDateSelected?(datePicker.date)
+        dismiss(animated: true)
+    }
+
+    @objc private func removeTapped() {
+        onRemove?()
+        dismiss(animated: true)
+    }
+
+    @objc private func cancelTapped() {
+        dismiss(animated: true)
     }
 }
