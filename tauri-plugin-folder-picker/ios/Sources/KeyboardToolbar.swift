@@ -110,8 +110,97 @@ class KeyboardToolbar: UIView {
 
     @objc private func buttonTapped(_ sender: UIButton) {
         guard let action = sender.accessibilityIdentifier, !action.isEmpty else { return }
-        let js = "window.__myceliumToolbar && window.__myceliumToolbar.\(action)()"
-        webView?.evaluateJavaScript(js, completionHandler: nil)
+
+        switch action {
+        case "todo":
+            showTodoPicker(from: sender)
+        case "heading":
+            showHeadingPicker(from: sender)
+        case "priority":
+            showPriorityPicker(from: sender)
+        default:
+            let js = "window.__myceliumToolbar && window.__myceliumToolbar.\(action)()"
+            webView?.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
+
+    // MARK: - Pickers
+
+    private func showTodoPicker(from sender: UIButton) {
+        let alert = UIAlertController(title: "Set TODO State", message: nil, preferredStyle: .actionSheet)
+        // Get keywords from JS config, or use defaults
+        let todoKw = ["TODO", "NEXT", "WAITING", "HOLD"]
+        let doneKw = ["DONE", "CANCELLED"]
+
+        alert.addAction(UIAlertAction(title: "None", style: .default) { [weak self] _ in
+            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet(null)", completionHandler: nil)
+        })
+        for kw in todoKw {
+            alert.addAction(UIAlertAction(title: kw, style: .default) { [weak self] _ in
+                self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet('\(kw)')", completionHandler: nil)
+            })
+        }
+        for kw in doneKw {
+            alert.addAction(UIAlertAction(title: "✓ \(kw)", style: .default) { [weak self] _ in
+                self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet('\(kw)')", completionHandler: nil)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sender
+            popover.sourceRect = sender.bounds
+        }
+        presentAlert(alert)
+    }
+
+    private func showHeadingPicker(from sender: UIButton) {
+        let alert = UIAlertController(title: "Insert Heading", message: nil, preferredStyle: .actionSheet)
+
+        alert.addAction(UIAlertAction(title: "Same level (auto)", style: .default) { [weak self] _ in
+            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.heading()", completionHandler: nil)
+        })
+        for level in 1...4 {
+            let stars = String(repeating: "*", count: level)
+            alert.addAction(UIAlertAction(title: "\(stars) Heading \(level)", style: .default) { [weak self] _ in
+                self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.headingLevel(\(level))", completionHandler: nil)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sender
+            popover.sourceRect = sender.bounds
+        }
+        presentAlert(alert)
+    }
+
+    private func showPriorityPicker(from sender: UIButton) {
+        let alert = UIAlertController(title: "Set Priority", message: nil, preferredStyle: .actionSheet)
+
+        alert.addAction(UIAlertAction(title: "None", style: .default) { [weak self] _ in
+            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet(null)", completionHandler: nil)
+        })
+        for p in ["A", "B", "C"] {
+            alert.addAction(UIAlertAction(title: "[#\(p)]", style: .default) { [weak self] _ in
+                self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet('\(p)')", completionHandler: nil)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sender
+            popover.sourceRect = sender.bounds
+        }
+        presentAlert(alert)
+    }
+
+    private func presentAlert(_ alert: UIAlertController) {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootVC = scene.windows.first?.rootViewController else { return }
+        var topVC = rootVC
+        while let presented = topVC.presentedViewController { topVC = presented }
+        topVC.present(alert, animated: true)
     }
 
     // MARK: - WKContentView Swizzle

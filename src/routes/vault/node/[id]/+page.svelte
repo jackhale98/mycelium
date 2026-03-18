@@ -60,8 +60,11 @@
 		(window as any).__myceliumToolbar = {
 			link: () => onLink(),
 			heading: () => onHeading(),
+			headingLevel: (lvl: number) => { editorComponent?.insertHeadingWithId(lvl); },
 			todo: () => cycleTodo(),
+			todoSet: (kw: string | null) => onTodo(kw),
 			priority: () => onPriority('A'),
+			prioritySet: (p: string | null) => onPriority(p),
 			deadline: () => onDeadline(),
 			scheduled: () => onScheduled(),
 			bold: () => onBold(),

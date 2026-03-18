@@ -39,12 +39,12 @@
 
 	const today = fmtDate(new Date());
 
-	function isOverdue(n: NodeRecord): boolean {
+	function isOverdue(n: HeadlineRecord): boolean {
 		const dl = extractDate(n.deadline);
 		return !!dl && dl < today && !orgConfig.doneKeywords.includes(n.todo ?? '');
 	}
 
-	function isDone(n: NodeRecord): boolean {
+	function isDone(n: HeadlineRecord): boolean {
 		return orgConfig.doneKeywords.includes(n.todo ?? '');
 	}
 
@@ -63,7 +63,7 @@
 		return out;
 	}
 
-	function itemsForDate(date: string): { node: HeadlineRecord; reason: 'deadline' | 'scheduled' }[] {
+	function itemsForDate(date: string): { node: HeadlineRecord; reason: 'deadline' | 'scheduled'; time: string }[] {
 		const result: { node: HeadlineRecord; reason: 'deadline' | 'scheduled'; time: string }[] = [];
 		for (const n of items) {
 			if (isDone(n)) continue;
