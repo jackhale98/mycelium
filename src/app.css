@@ -40,6 +40,11 @@ html, body {
 	-webkit-text-size-adjust: 100%;
 }
 
+/* Prevent white flash during dark-mode page transitions */
+html.dark, html.dark body {
+	background-color: var(--color-surface-950);
+}
+
 /* iOS keyboard: keep toolbar visible above keyboard */
 @supports (padding-bottom: env(keyboard-inset-height, 0px)) {
 	.keyboard-aware {
