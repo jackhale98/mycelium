@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
-	import { getAgenda, readFile, saveFile, listNodes } from '$lib/tauri/commands';
+	import { getAgenda, readFile, saveFile, listNodes, listFiles } from '$lib/tauri/commands';
 	import { vault } from '$lib/stores/vault.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import type { HeadlineRecord } from '$lib/types/node';
@@ -38,6 +38,19 @@
 	}
 
 	const today = fmtDate(new Date());
+
+	/** Navigate to the node for an agenda item */
+	function navigateToItem(item: HeadlineRecord) {
+		if (item.node_id) {
+			navigation.navigateToNode(item.node_id);
+			return;
+		}
+		// No node_id — find the first node in the same file
+		const fileNode = vault.nodes.find(n => n.file === item.file);
+		if (fileNode) {
+			navigation.navigateToNode(fileNode.id);
+		}
+	}
 
 	function isOverdue(n: HeadlineRecord): boolean {
 		const dl = extractDate(n.deadline);
@@ -343,7 +356,7 @@
 				{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
 			</select>
 
-			<button onclick={() => item.node_id ? navigation.navigateToNode(item.node_id) : navigation.navigateToVault()} style="min-width:0;flex:1;text-align:left">
+			<button onclick={() => navigateToItem(item)} style="min-width:0;flex:1;text-align:left">
 				<div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{isDone(item) ? 'text-decoration:line-through;opacity:0.6' : 'font-weight:500'}">{item.title ?? 'Untitled'}</div>
 				{#if dlDate || scDate}
 					<div style="display:flex;gap:6px;font-size:10px;margin-top:2px;flex-wrap:wrap">
