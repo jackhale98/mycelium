@@ -102,6 +102,21 @@
 			if (taskFilter !== 'all' && n.todo !== taskFilter) return false;
 			if (taskSearch.trim()) return n.title?.toLowerCase().includes(taskSearch.toLowerCase()) ?? false;
 			return true;
+		}).sort((a, b) => {
+			const aDl = extractDate(a.deadline);
+			const bDl = extractDate(b.deadline);
+			const aSc = extractDate(a.scheduled);
+			const bSc = extractDate(b.scheduled);
+			const aDate = aDl || aSc || '';
+			const bDate = bDl || bSc || '';
+			// Items with deadline first, then scheduled, then no date
+			const aRank = aDl ? 0 : aSc ? 1 : 2;
+			const bRank = bDl ? 0 : bSc ? 1 : 2;
+			if (aRank !== bRank) return aRank - bRank;
+			// Within same category, sort by date
+			if (aDate && bDate && aDate !== bDate) return aDate.localeCompare(bDate);
+			// Same date: sort by priority (A < B < C < none)
+			return (a.priority ?? 'Z').localeCompare(b.priority ?? 'Z');
 		})
 	);
 
@@ -250,11 +265,7 @@
 						</h3>
 						{#if dayItems.length > 0}
 							{#each dayItems as di}
-								<div class="flex items-center gap-1.5">
-									<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;{di.reason === 'deadline' ? 'color:#dc2626;background:#fef2f2' : 'color:#2563eb;background:#eff6ff'}">{di.reason === 'deadline' ? 'DL' : 'SC'}</span>
-									{#if di.time}<span style="font-size:10px;color:#6b7280;font-variant-numeric:tabular-nums">{di.time}</span>{/if}
-									<div class="flex-1">{@render taskRow(di.node)}</div>
-								</div>
+								{@render taskRow(di.node)}
 							{/each}
 						{:else}
 							<p class="py-0.5 text-[11px] text-surface-700/40 dark:text-surface-300/40">—</p>
