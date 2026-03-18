@@ -3,6 +3,7 @@
 	import '../app.css';
 	import type { Snippet } from 'svelte';
 	import { theme } from '$lib/stores/theme.svelte';
+	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -15,10 +16,16 @@
 		};
 		mq.addEventListener('change', handler);
 
+		// Expose orgConfig to native iOS toolbar pickers
+		(window as any).__myceliumOrgConfig = orgConfig;
+
 		// Install native iOS keyboard toolbar
 		setupNativeToolbar();
 
-		return () => mq.removeEventListener('change', handler);
+		return () => {
+			mq.removeEventListener('change', handler);
+			delete (window as any).__myceliumOrgConfig;
+		};
 	});
 
 	async function setupNativeToolbar() {

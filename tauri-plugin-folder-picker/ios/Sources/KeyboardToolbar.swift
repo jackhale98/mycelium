@@ -131,31 +131,41 @@ class KeyboardToolbar: UIView {
     // MARK: - Pickers
 
     private func showTodoPicker(from sender: UIButton) {
-        let alert = UIAlertController(title: "Set TODO State", message: nil, preferredStyle: .actionSheet)
-        // Get keywords from JS config, or use defaults
-        let todoKw = ["TODO", "NEXT", "WAITING", "HOLD"]
-        let doneKw = ["DONE", "CANCELLED"]
+        // Fetch user-configured keywords from JS orgConfig store
+        let js = "JSON.stringify({ todo: window.__myceliumOrgConfig?.todoKeywords ?? ['TODO'], done: window.__myceliumOrgConfig?.doneKeywords ?? ['DONE'] })"
+        webView?.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self = self else { return }
+            var todoKw = ["TODO"]
+            var doneKw = ["DONE"]
+            if let jsonStr = result as? String,
+               let data = try? JSONSerialization.jsonObject(with: Data(jsonStr.utf8)) as? [String: [String]] {
+                todoKw = data["todo"] ?? todoKw
+                doneKw = data["done"] ?? doneKw
+            }
 
-        alert.addAction(UIAlertAction(title: "None", style: .default) { [weak self] _ in
-            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet(null)", completionHandler: nil)
-        })
-        for kw in todoKw {
-            alert.addAction(UIAlertAction(title: kw, style: .default) { [weak self] _ in
-                self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet('\(kw)')", completionHandler: nil)
-            })
+            DispatchQueue.main.async {
+                let alert = UIAlertController(title: "Set TODO State", message: nil, preferredStyle: .actionSheet)
+                alert.addAction(UIAlertAction(title: "None", style: .default) { _ in
+                    self.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet(null)", completionHandler: nil)
+                })
+                for kw in todoKw {
+                    alert.addAction(UIAlertAction(title: kw, style: .default) { _ in
+                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet('\(kw)')", completionHandler: nil)
+                    })
+                }
+                for kw in doneKw {
+                    alert.addAction(UIAlertAction(title: "✓ \(kw)", style: .default) { _ in
+                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet('\(kw)')", completionHandler: nil)
+                    })
+                }
+                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+                if let popover = alert.popoverPresentationController {
+                    popover.sourceView = sender
+                    popover.sourceRect = sender.bounds
+                }
+                self.presentAlert(alert)
+            }
         }
-        for kw in doneKw {
-            alert.addAction(UIAlertAction(title: "✓ \(kw)", style: .default) { [weak self] _ in
-                self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet('\(kw)')", completionHandler: nil)
-            })
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-
-        if let popover = alert.popoverPresentationController {
-            popover.sourceView = sender
-            popover.sourceRect = sender.bounds
-        }
-        presentAlert(alert)
     }
 
     private func showHeadingPicker(from sender: UIButton) {
@@ -180,23 +190,33 @@ class KeyboardToolbar: UIView {
     }
 
     private func showPriorityPicker(from sender: UIButton) {
-        let alert = UIAlertController(title: "Set Priority", message: nil, preferredStyle: .actionSheet)
+        let js = "JSON.stringify(window.__myceliumOrgConfig?.priorities ?? ['A','B','C'])"
+        webView?.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self = self else { return }
+            var priorities = ["A", "B", "C"]
+            if let jsonStr = result as? String,
+               let data = try? JSONSerialization.jsonObject(with: Data(jsonStr.utf8)) as? [String] {
+                priorities = data
+            }
 
-        alert.addAction(UIAlertAction(title: "None", style: .default) { [weak self] _ in
-            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet(null)", completionHandler: nil)
-        })
-        for p in ["A", "B", "C"] {
-            alert.addAction(UIAlertAction(title: "[#\(p)]", style: .default) { [weak self] _ in
-                self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet('\(p)')", completionHandler: nil)
-            })
+            DispatchQueue.main.async {
+                let alert = UIAlertController(title: "Set Priority", message: nil, preferredStyle: .actionSheet)
+                alert.addAction(UIAlertAction(title: "None", style: .default) { _ in
+                    self.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet(null)", completionHandler: nil)
+                })
+                for p in priorities {
+                    alert.addAction(UIAlertAction(title: "[#\(p)]", style: .default) { _ in
+                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet('\(p)')", completionHandler: nil)
+                    })
+                }
+                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+                if let popover = alert.popoverPresentationController {
+                    popover.sourceView = sender
+                    popover.sourceRect = sender.bounds
+                }
+                self.presentAlert(alert)
+            }
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-
-        if let popover = alert.popoverPresentationController {
-            popover.sourceView = sender
-            popover.sourceRect = sender.bounds
-        }
-        presentAlert(alert)
     }
 
     private func showDatePicker(for type: String, from sender: UIButton) {
