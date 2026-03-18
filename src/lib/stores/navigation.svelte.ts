@@ -27,19 +27,26 @@ class NavigationStore {
 			const prev = history.pop();
 			sessionStorage.setItem('mycelium-nav-history', JSON.stringify(history));
 			if (prev) {
-				goto(prev);
+				// Node pages need full reload to re-mount with new ID
+				if (prev.includes('/vault/node/')) {
+					window.location.href = prev;
+				} else {
+					goto(prev);
+				}
 				return;
 			}
 		} catch { /* ignore */ }
 		goto('/vault');
 	}
 
+	/** Navigate to a node — uses full reload since node page reads ID on mount */
 	navigateToNode(id: string) {
 		this.pushHistory();
 		this.activeTab = 'files';
-		goto(`/vault/node/${id}`);
+		window.location.href = `/vault/node/${id}`;
 	}
 
+	// Tab navigations use goto() for instant client-side transitions (no flash)
 	navigateToGraph() {
 		this.pushHistory();
 		this.activeTab = 'graph';

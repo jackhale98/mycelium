@@ -180,6 +180,20 @@
 		});
 	}
 
+	/** Insert a plain heading at a specific level (no :ID:) */
+	export function insertHeadingAt(level: number) {
+		if (!view) return;
+		view.focus();
+		const { from } = view.state.selection.main;
+		const line = view.state.doc.lineAt(from);
+		const stars = '*'.repeat(level);
+		const text = `\n${stars} `;
+		view.dispatch({
+			changes: { from: line.to, insert: text },
+			selection: { anchor: line.to + text.length },
+		});
+	}
+
 	/** Insert a plain heading (no :ID:) at the same level as the nearest heading */
 	export function insertHeading() {
 		if (!view) return;

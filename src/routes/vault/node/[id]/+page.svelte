@@ -60,7 +60,8 @@
 		(window as any).__myceliumToolbar = {
 			link: () => onLink(),
 			heading: () => onHeading(),
-			headingLevel: (lvl: number) => { editorComponent?.insertHeadingWithId(lvl); },
+			headingLevel: (lvl: number) => { editorComponent?.insertHeadingAt(lvl); },
+			makeNode: () => makeHeadingIntoNode(),
 			todo: () => cycleTodo(),
 			todoSet: (kw: string | null) => onTodo(kw),
 			priority: () => onPriority('A'),
@@ -81,6 +82,21 @@
 			srcblock: () => onSrcBlock(),
 			quote: () => onQuote(),
 			timestamp: () => onTimestamp(),
+			/** Return existing date string for pre-selection in native date picker */
+			getExisting: (type: string): string => {
+				const lines = editor.content.split('\n');
+				const idx = findNearestHeadlineIdx(lines);
+				if (idx === -1) return '';
+				const keyword = type === 'deadline' ? 'DEADLINE:' : 'SCHEDULED:';
+				for (let j = idx + 1; j < lines.length && j <= idx + 10; j++) {
+					if (lines[j].includes(keyword)) {
+						const m = lines[j].match(/(\d{4}-\d{2}-\d{2})/);
+						return m ? m[1] : '';
+					}
+					if (/^\*+\s/.test(lines[j])) break;
+				}
+				return '';
+			},
 		};
 
 		return () => {
@@ -159,6 +175,37 @@
 			await loadNode(nodeId);
 			try { vault.updateNodes(await listNodes()); } catch {}
 		} catch (e) { error = String(e); }
+	}
+
+	/** Add :ID: properties to the nearest heading, turning it into an org-roam node */
+	function makeHeadingIntoNode() {
+		modifyContent(content => {
+			const lines = content.split('\n');
+			const idx = findNearestHeadlineIdx(lines);
+			if (idx === -1) return content;
+			// Check if it already has :PROPERTIES: with :ID: below it
+			let insertAt = idx;
+			for (let j = idx + 1; j < lines.length && j <= idx + 10; j++) {
+				const t = lines[j].trim();
+				if (t === ':PROPERTIES:') {
+					// Check if :ID: already exists in the drawer
+					for (let k = j + 1; k < lines.length; k++) {
+						if (lines[k].trim() === ':END:') break;
+						if (lines[k].trim().startsWith(':ID:')) return content; // already a node
+					}
+					// Add :ID: inside existing properties
+					const id = crypto.randomUUID();
+					lines.splice(j + 1, 0, `:ID: ${id}`);
+					return lines.join('\n');
+				}
+				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:')) {
+					insertAt = j;
+				} else break;
+			}
+			const id = crypto.randomUUID();
+			lines.splice(insertAt + 1, 0, ':PROPERTIES:', `:ID: ${id}`, ':END:');
+			return lines.join('\n');
+		});
 	}
 
 	// Source mode toolbar actions

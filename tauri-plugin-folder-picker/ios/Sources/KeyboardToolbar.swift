@@ -52,6 +52,7 @@ class KeyboardToolbar: UIView {
             ("Link", "link", .systemGreen, true, 44),
             ("|", "", nil, false, 1),
             ("H", "heading", nil, true, 36),
+            ("ID", "makeNode", .systemPurple, true, 32),
             ("TODO", "todo", .systemRed, true, 48),
             ("[#]", "priority", .systemOrange, true, 38),
             ("DL", "deadline", .systemRed, false, 32),
@@ -220,40 +221,55 @@ class KeyboardToolbar: UIView {
     }
 
     private func showDatePicker(for type: String, from sender: UIButton) {
-        let vc = DatePickerViewController()
-        vc.titleText = type == "deadline" ? "Set Deadline" : "Set Scheduled"
-        vc.onDateSelected = { [weak self] date in
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            let dateStr = formatter.string(from: date)
-            let dayFormatter = DateFormatter()
-            dayFormatter.dateFormat = "EEE"
-            let dayStr = dayFormatter.string(from: date)
-            let timestamp = "<\(dateStr) \(dayStr)>"
-            let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
-            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)('\(timestamp)')", completionHandler: nil)
+        // Fetch existing date from JS so we can pre-select it
+        let jsGet = "window.__myceliumToolbar?.getExisting?.('\(type)') ?? ''"
+        webView?.evaluateJavaScript(jsGet) { [weak self] result, _ in
+            guard let self = self else { return }
+            let existingStr = result as? String ?? ""
+
+            DispatchQueue.main.async {
+                let vc = DatePickerViewController()
+                vc.titleText = type == "deadline" ? "Set Deadline" : "Set Scheduled"
+
+                // Pre-select existing date if available
+                if !existingStr.isEmpty {
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM-dd"
+                    if let date = formatter.date(from: existingStr) {
+                        vc.initialDate = date
+                    }
+                }
+
+                vc.onDateSelected = { [weak self] date in
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM-dd"
+                    let dateStr = formatter.string(from: date)
+                    let dayFormatter = DateFormatter()
+                    dayFormatter.dateFormat = "EEE"
+                    let dayStr = dayFormatter.string(from: date)
+                    let timestamp = "<\(dateStr) \(dayStr)>"
+                    let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
+                    self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)('\(timestamp)')", completionHandler: nil)
+                }
+                vc.onRemove = { [weak self] in
+                    let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
+                    self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)(null)", completionHandler: nil)
+                }
+                vc.modalPresentationStyle = .pageSheet
+                if let sheet = vc.sheetPresentationController {
+                    sheet.detents = [.large()]
+                }
+                self.presentAlert(vc)
+            }
         }
-        vc.onRemove = { [weak self] in
-            let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
-            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)(null)", completionHandler: nil)
-        }
-        vc.modalPresentationStyle = .pageSheet
-        if let sheet = vc.sheetPresentationController {
-            sheet.detents = [.medium()]
-        }
+    }
+
+    private func presentAlert(_ vc: UIViewController) {
         guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
               let rootVC = scene.windows.first?.rootViewController else { return }
         var topVC = rootVC
         while let presented = topVC.presentedViewController { topVC = presented }
         topVC.present(vc, animated: true)
-    }
-
-    private func presentAlert(_ alert: UIAlertController) {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = scene.windows.first?.rootViewController else { return }
-        var topVC = rootVC
-        while let presented = topVC.presentedViewController { topVC = presented }
-        topVC.present(alert, animated: true)
     }
 
     // MARK: - WKContentView Swizzle
@@ -320,6 +336,7 @@ class KeyboardToolbar: UIView {
 /// Presented as a half-sheet so nothing overlaps.
 class DatePickerViewController: UIViewController {
     var titleText: String = "Pick a Date"
+    var initialDate: Date?
     var onDateSelected: ((Date) -> Void)?
     var onRemove: (() -> Void)?
 
@@ -329,21 +346,7 @@ class DatePickerViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
 
-        // Title label
-        let titleLabel = UILabel()
-        titleLabel.text = titleText
-        titleLabel.font = .boldSystemFont(ofSize: 17)
-        titleLabel.textAlignment = .center
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(titleLabel)
-
-        // Date picker
-        datePicker.datePickerMode = .date
-        datePicker.preferredDatePickerStyle = .inline
-        datePicker.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(datePicker)
-
-        // Button stack
+        // Button stack — placed at top so it's always visible
         let setBtn = UIButton(type: .system)
         setBtn.setTitle("Set Date", for: .normal)
         setBtn.titleLabel?.font = .boldSystemFont(ofSize: 17)
@@ -370,19 +373,39 @@ class DatePickerViewController: UIViewController {
         btnStack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(btnStack)
 
+        // Title label
+        let titleLabel = UILabel()
+        titleLabel.text = titleText
+        titleLabel.font = .boldSystemFont(ofSize: 17)
+        titleLabel.textAlignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(titleLabel)
+
+        // Date picker
+        datePicker.datePickerMode = .date
+        datePicker.preferredDatePickerStyle = .inline
+        if let initial = initialDate {
+            datePicker.date = initial
+        }
+        datePicker.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(datePicker)
+
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-
-            datePicker.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
-            datePicker.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
-            datePicker.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
-
-            btnStack.topAnchor.constraint(equalTo: datePicker.bottomAnchor, constant: 8),
+            // Buttons at top
+            btnStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             btnStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             btnStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             btnStack.heightAnchor.constraint(equalToConstant: 44),
+
+            // Title below buttons
+            titleLabel.topAnchor.constraint(equalTo: btnStack.bottomAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            // Date picker fills the rest
+            datePicker.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            datePicker.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            datePicker.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
         ])
     }
 
