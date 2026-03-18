@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { navigation, type Tab } from '$lib/stores/navigation.svelte';
 
 	const tabs: { id: Tab; label: string; icon: string; href: string }[] = [
@@ -33,7 +34,7 @@
 	{#each tabs as tab}
 		<a
 			href={tab.href}
-			onclick={(e) => { e.preventDefault(); navigation.setTab(tab.id); window.location.href = tab.href; }}
+			onclick={(e) => { e.preventDefault(); navigation.setTab(tab.id); goto(tab.href); }}
 			class="flex flex-col items-center gap-0.5 px-3 py-1.5 text-[10px] transition-colors"
 			class:text-mycelium-600={navigation.activeTab === tab.id}
 			class:dark:text-mycelium-400={navigation.activeTab === tab.id}

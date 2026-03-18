@@ -118,6 +118,10 @@ class KeyboardToolbar: UIView {
             showHeadingPicker(from: sender)
         case "priority":
             showPriorityPicker(from: sender)
+        case "deadline":
+            showDatePicker(for: "deadline", from: sender)
+        case "scheduled":
+            showDatePicker(for: "scheduled", from: sender)
         default:
             let js = "window.__myceliumToolbar && window.__myceliumToolbar.\(action)()"
             webView?.evaluateJavaScript(js, completionHandler: nil)
@@ -186,6 +190,53 @@ class KeyboardToolbar: UIView {
                 self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet('\(p)')", completionHandler: nil)
             })
         }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sender
+            popover.sourceRect = sender.bounds
+        }
+        presentAlert(alert)
+    }
+
+    private func showDatePicker(for type: String, from sender: UIButton) {
+        let alert = UIAlertController(title: type == "deadline" ? "Set Deadline" : "Set Scheduled", message: "\n\n\n\n\n\n\n\n\n", preferredStyle: .actionSheet)
+
+        let datePicker = UIDatePicker()
+        datePicker.datePickerMode = .date
+        datePicker.preferredDatePickerStyle = .inline
+        datePicker.translatesAutoresizingMaskIntoConstraints = false
+        alert.view.addSubview(datePicker)
+
+        NSLayoutConstraint.activate([
+            datePicker.leadingAnchor.constraint(equalTo: alert.view.leadingAnchor, constant: 8),
+            datePicker.trailingAnchor.constraint(equalTo: alert.view.trailingAnchor, constant: -8),
+            datePicker.topAnchor.constraint(equalTo: alert.view.topAnchor, constant: 50),
+        ])
+
+        // Resize the alert to fit the date picker
+        let height = NSLayoutConstraint(item: alert.view!, attribute: .height, relatedBy: .equal, toItem: nil, attribute: .notAnAttribute, multiplier: 1, constant: 480)
+        alert.view.addConstraint(height)
+
+        alert.addAction(UIAlertAction(title: "Set", style: .default) { [weak self] _ in
+            let date = datePicker.date
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            let dateStr = formatter.string(from: date)
+
+            let dayFormatter = DateFormatter()
+            dayFormatter.dateFormat = "EEE"
+            let dayStr = dayFormatter.string(from: date)
+
+            // Format as org timestamp: <2024-01-15 Mon>
+            let timestamp = "<\(dateStr) \(dayStr)>"
+            let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
+            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)('\(timestamp)')", completionHandler: nil)
+        })
+        alert.addAction(UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
+            let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
+            self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)(null)", completionHandler: nil)
+        })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
 
         if let popover = alert.popoverPresentationController {

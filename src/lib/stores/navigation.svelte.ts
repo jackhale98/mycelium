@@ -1,3 +1,5 @@
+import { goto } from '$app/navigation';
+
 export type Tab = 'files' | 'graph' | 'search' | 'daily' | 'agenda' | 'settings';
 
 class NavigationStore {
@@ -12,7 +14,6 @@ class NavigationStore {
 			try {
 				const history = JSON.parse(sessionStorage.getItem('mycelium-nav-history') ?? '[]') as string[];
 				history.push(current);
-				// Keep last 50 entries
 				if (history.length > 50) history.splice(0, history.length - 50);
 				sessionStorage.setItem('mycelium-nav-history', JSON.stringify(history));
 			} catch { /* ignore */ }
@@ -26,47 +27,46 @@ class NavigationStore {
 			const prev = history.pop();
 			sessionStorage.setItem('mycelium-nav-history', JSON.stringify(history));
 			if (prev) {
-				window.location.href = prev;
+				goto(prev);
 				return;
 			}
 		} catch { /* ignore */ }
-		// Fallback: go to vault home
-		window.location.href = '/vault';
+		goto('/vault');
 	}
 
 	navigateToNode(id: string) {
 		this.pushHistory();
 		this.activeTab = 'files';
-		window.location.href = `/vault/node/${id}`;
+		goto(`/vault/node/${id}`);
 	}
 
 	navigateToGraph() {
 		this.pushHistory();
 		this.activeTab = 'graph';
-		window.location.href = '/vault/graph';
+		goto('/vault/graph');
 	}
 
 	navigateToSearch() {
 		this.pushHistory();
 		this.activeTab = 'search';
-		window.location.href = '/vault/search';
+		goto('/vault/search');
 	}
 
 	navigateToDaily() {
 		this.pushHistory();
 		this.activeTab = 'daily';
-		window.location.href = '/vault/daily';
+		goto('/vault/daily');
 	}
 
 	navigateToTags() {
 		this.pushHistory();
-		window.location.href = '/vault/tags';
+		goto('/vault/tags');
 	}
 
 	navigateToVault() {
 		this.pushHistory();
 		this.activeTab = 'files';
-		window.location.href = '/vault';
+		goto('/vault');
 	}
 
 	navigateHome() {

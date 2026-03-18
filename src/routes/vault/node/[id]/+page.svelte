@@ -66,7 +66,9 @@
 			priority: () => onPriority('A'),
 			prioritySet: (p: string | null) => onPriority(p),
 			deadline: () => onDeadline(),
+			deadlineSet: (ts: string | null) => setDeadline(ts),
 			scheduled: () => onScheduled(),
+			scheduledSet: (ts: string | null) => setScheduled(ts),
 			bold: () => onBold(),
 			italic: () => onItalic(),
 			underline: () => onUnderline(),
@@ -322,6 +324,69 @@
 				}
 			}
 			lines.splice(insertAfter + 1, 0, `SCHEDULED: ${todayTimestamp()}`);
+			return lines.join('\n');
+		});
+	}
+
+	/** Set deadline with a specific timestamp (from native date picker), or remove it */
+	function setDeadline(timestamp: string | null) {
+		modifyContent(content => {
+			const lines = content.split('\n');
+			const targetLine = findNearestHeadlineIdx(lines);
+			if (targetLine === -1) return content;
+			let insertAfter = targetLine;
+			for (let j = targetLine + 1; j < lines.length; j++) {
+				const t = lines[j].trim();
+				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
+					insertAfter = j;
+					if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
+				} else break;
+			}
+			// Find existing DEADLINE line
+			for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
+				if (lines[j].includes('DEADLINE:')) {
+					if (timestamp) {
+						lines[j] = lines[j].replace(/DEADLINE:\s*<[^>]*>/, `DEADLINE: ${timestamp}`);
+					} else {
+						lines.splice(j, 1); // Remove the line
+					}
+					return lines.join('\n');
+				}
+			}
+			if (timestamp) {
+				lines.splice(insertAfter + 1, 0, `DEADLINE: ${timestamp}`);
+			}
+			return lines.join('\n');
+		});
+	}
+
+	/** Set scheduled with a specific timestamp (from native date picker), or remove it */
+	function setScheduled(timestamp: string | null) {
+		modifyContent(content => {
+			const lines = content.split('\n');
+			const targetLine = findNearestHeadlineIdx(lines);
+			if (targetLine === -1) return content;
+			let insertAfter = targetLine;
+			for (let j = targetLine + 1; j < lines.length; j++) {
+				const t = lines[j].trim();
+				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
+					insertAfter = j;
+					if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
+				} else break;
+			}
+			for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
+				if (lines[j].includes('SCHEDULED:')) {
+					if (timestamp) {
+						lines[j] = lines[j].replace(/SCHEDULED:\s*<[^>]*>/, `SCHEDULED: ${timestamp}`);
+					} else {
+						lines.splice(j, 1);
+					}
+					return lines.join('\n');
+				}
+			}
+			if (timestamp) {
+				lines.splice(insertAfter + 1, 0, `SCHEDULED: ${timestamp}`);
+			}
 			return lines.join('\n');
 		});
 	}
