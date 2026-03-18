@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-setup-toolbar"
+description = "Enables the setup_toolbar command without any pre-configured scope."
+commands.allow = ["setup_toolbar"]
+
+[[permission]]
+identifier = "deny-setup-toolbar"
+description = "Denies the setup_toolbar command without any pre-configured scope."
+commands.deny = ["setup_toolbar"]

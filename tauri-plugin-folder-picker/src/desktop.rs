@@ -22,4 +22,9 @@ impl<R: Runtime> FolderPicker<R> {
         // On desktop, no security-scoped access needed
         Ok(PickFolderResponse { path: None })
     }
+
+    pub fn setup_toolbar(&self) -> crate::Result<PickFolderResponse> {
+        // On desktop, no keyboard toolbar needed
+        Ok(PickFolderResponse { path: None })
+    }
 }

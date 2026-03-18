@@ -319,10 +319,22 @@
           "markdownDescription": "Denies the restore_access command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the folder picker plugin\n#### This default permission set includes:\n\n- `allow-pick-folder`\n- `allow-restore-access`",
+          "description": "Enables the setup_toolbar command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setup-toolbar",
+          "markdownDescription": "Enables the setup_toolbar command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setup_toolbar command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setup-toolbar",
+          "markdownDescription": "Denies the setup_toolbar command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the folder picker plugin\n#### This default permission set includes:\n\n- `allow-pick-folder`\n- `allow-restore-access`\n- `allow-setup-toolbar`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the folder picker plugin\n#### This default permission set includes:\n\n- `allow-pick-folder`\n- `allow-restore-access`"
+          "markdownDescription": "Default permissions for the folder picker plugin\n#### This default permission set includes:\n\n- `allow-pick-folder`\n- `allow-restore-access`\n- `allow-setup-toolbar`"
         }
       ]
     }

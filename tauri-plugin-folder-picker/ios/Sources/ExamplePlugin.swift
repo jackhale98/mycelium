@@ -45,6 +45,36 @@ class FolderPickerPlugin: Plugin {
         }
     }
 
+    /// Install the native keyboard toolbar above the iOS keyboard.
+    @objc public func setupToolbar(_ invoke: Invoke) throws {
+        DispatchQueue.main.async {
+            // Find the WKWebView in the view hierarchy
+            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = scene.windows.first,
+                  let webView = Self.findWKWebView(in: window) else {
+                NSLog("[Mycelium] Could not find WKWebView for toolbar setup")
+                invoke.resolve(["installed": false])
+                return
+            }
+
+            KeyboardToolbar.install(on: webView)
+            invoke.resolve(["installed": true])
+        }
+    }
+
+    /// Walk view hierarchy to find the WKWebView.
+    private static func findWKWebView(in view: UIView) -> WKWebView? {
+        if let wk = view as? WKWebView {
+            return wk
+        }
+        for subview in view.subviews {
+            if let found = findWKWebView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+
     /// Restore security-scoped access from a stored bookmark.
     /// Called automatically on init and can be called explicitly via command.
     @objc public func restoreAccess(_ invoke: Invoke) throws {

@@ -53,9 +53,34 @@
 			if ((e.metaKey || e.ctrlKey) && e.key === 'k' && showSource) { e.preventDefault(); showLinkSwitcher = true; }
 		};
 		document.addEventListener('keydown', onKey);
+
+		// Register native iOS keyboard toolbar bridge
+		// The native toolbar calls these functions via evaluateJavaScript
+		(window as any).__myceliumToolbar = {
+			link: () => onLink(),
+			heading: () => onHeading(2),
+			todo: () => onTodo('TODO'),
+			priority: () => onPriority('A'),
+			deadline: () => onDeadline(),
+			scheduled: () => onScheduled(),
+			bold: () => onBold(),
+			italic: () => onItalic(),
+			underline: () => onUnderline(),
+			strike: () => onStrike(),
+			code: () => onCode(),
+			verbatim: () => onVerbatim(),
+			list: () => onList(),
+			checkbox: () => onCheckbox(),
+			table: () => onTable(3, 3),
+			srcblock: () => onSrcBlock(),
+			quote: () => onQuote(),
+			timestamp: () => onTimestamp(),
+		};
+
 		return () => {
 			document.removeEventListener('org-editor-save', onSave);
 			document.removeEventListener('keydown', onKey);
+			delete (window as any).__myceliumToolbar;
 			clearTimeout(autoSaveTimer);
 		};
 	});

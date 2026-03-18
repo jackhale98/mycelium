@@ -1,0 +1,173 @@
+import UIKit
+import WebKit
+
+/// Native iOS keyboard toolbar that sits above the software keyboard.
+/// Uses the inputAccessoryView mechanism — same approach as iA Writer, Bear, Blink.
+///
+/// Installation: call `KeyboardToolbar.install(on:)` with the WKWebView instance.
+/// Each button tap calls evaluateJavaScript to trigger the web app's handlers.
+class KeyboardToolbar: UIView {
+    private weak var webView: WKWebView?
+
+    /// Create and install the toolbar on a WKWebView.
+    /// This replaces the default inputAccessoryView by swizzling WKContentView.
+    static func install(on webView: WKWebView) {
+        let toolbar = KeyboardToolbar(webView: webView)
+        // Store toolbar reference on the webView to keep it alive
+        objc_setAssociatedObject(webView, "myceliumToolbar", toolbar, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        // Install via WKContentView swizzle
+        swizzleInputAccessoryView(toolbar: toolbar, in: webView)
+    }
+
+    private init(webView: WKWebView) {
+        self.webView = webView
+        super.init(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 44))
+        autoresizingMask = .flexibleWidth
+        backgroundColor = .secondarySystemBackground
+        setupUI()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: - UI Setup
+
+    private func setupUI() {
+        // Top border
+        let border = UIView()
+        border.backgroundColor = .separator
+        border.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 0.5)
+        border.autoresizingMask = .flexibleWidth
+        addSubview(border)
+
+        // Scroll view for horizontal scrolling
+        let scroll = UIScrollView()
+        scroll.frame = CGRect(x: 0, y: 0.5, width: bounds.width, height: 43.5)
+        scroll.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.showsVerticalScrollIndicator = false
+        addSubview(scroll)
+
+        // Button definitions: (label, action, color, bold, width)
+        let buttons: [(String, String, UIColor?, Bool, CGFloat)] = [
+            ("Link", "link", .systemGreen, true, 44),
+            ("|", "", nil, false, 1),
+            ("H", "heading", nil, true, 36),
+            ("TODO", "todo", .systemRed, true, 48),
+            ("[#]", "priority", .systemOrange, true, 38),
+            ("DL", "deadline", .systemRed, false, 32),
+            ("SC", "scheduled", .systemBlue, false, 32),
+            ("|", "", nil, false, 1),
+            ("B", "bold", nil, true, 32),
+            ("I", "italic", nil, false, 32),
+            ("U", "underline", nil, false, 32),
+            ("S", "strike", nil, false, 32),
+            ("~c~", "code", nil, false, 38),
+            ("=v=", "verbatim", nil, false, 38),
+            ("|", "", nil, false, 1),
+            ("-", "list", nil, false, 28),
+            ("☐", "checkbox", nil, false, 32),
+            ("|T|", "table", nil, false, 38),
+            ("SRC", "srcblock", nil, false, 42),
+            ("❝", "quote", nil, false, 28),
+            ("Date", "timestamp", nil, false, 42),
+        ]
+
+        var x: CGFloat = 8
+        let btnHeight: CGFloat = 36
+        let yOffset: CGFloat = (43.5 - btnHeight) / 2
+
+        for (label, action, color, bold, width) in buttons {
+            if label == "|" {
+                let sep = UIView(frame: CGRect(x: x, y: 8, width: 1, height: 28))
+                sep.backgroundColor = .separator
+                scroll.addSubview(sep)
+                x += 5
+                continue
+            }
+
+            let btn = UIButton(type: .system)
+            btn.frame = CGRect(x: x, y: yOffset, width: width, height: btnHeight)
+            btn.setTitle(label, for: .normal)
+            btn.accessibilityIdentifier = action
+
+            if let color = color {
+                btn.setTitleColor(color, for: .normal)
+            }
+
+            btn.titleLabel?.font = bold
+                ? UIFont.boldSystemFont(ofSize: 13)
+                : UIFont.systemFont(ofSize: 12)
+
+            btn.addTarget(self, action: #selector(buttonTapped(_:)), for: .touchUpInside)
+            scroll.addSubview(btn)
+            x += width + 2
+        }
+
+        scroll.contentSize = CGSize(width: x + 8, height: 43.5)
+    }
+
+    // MARK: - Button Tap Handler
+
+    @objc private func buttonTapped(_ sender: UIButton) {
+        guard let action = sender.accessibilityIdentifier, !action.isEmpty else { return }
+        let js = "window.__myceliumToolbar && window.__myceliumToolbar.\(action)()"
+        webView?.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    // MARK: - WKContentView Swizzle
+
+    /// Install the toolbar by swizzling the inputAccessoryView on WKContentView.
+    /// This is the standard technique used by a-shell, Blink, and other WKWebView apps.
+    private static func swizzleInputAccessoryView(toolbar: KeyboardToolbar, in webView: WKWebView) {
+        guard let contentView = findContentView(in: webView) else {
+            NSLog("[Mycelium] Could not find WKContentView for toolbar installation")
+            return
+        }
+
+        // Store toolbar on the content view
+        objc_setAssociatedObject(contentView, "myceliumToolbarView", toolbar, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+        let contentViewClass: AnyClass = type(of: contentView)
+
+        // Create a dynamic subclass to override inputAccessoryView
+        let subclassName = "MyceliumContentView"
+        if let existingClass = NSClassFromString(subclassName) {
+            // Already swizzled, just update the toolbar reference
+            object_setClass(contentView, existingClass)
+            return
+        }
+
+        guard let subclass = objc_allocateClassPair(contentViewClass, subclassName, 0) else {
+            NSLog("[Mycelium] Failed to create dynamic subclass for toolbar")
+            return
+        }
+
+        // Override inputAccessoryView getter
+        let getterSel = NSSelectorFromString("inputAccessoryView")
+        let getterBlock: @convention(block) (AnyObject) -> UIView? = { obj in
+            return objc_getAssociatedObject(obj, "myceliumToolbarView") as? UIView
+        }
+        let getterImp = imp_implementationWithBlock(getterBlock as Any)
+        let typeEncoding = "@@:" // returns object, takes self + _cmd
+        class_addMethod(subclass, getterSel, getterImp, typeEncoding)
+
+        objc_registerClassPair(subclass)
+        object_setClass(contentView, subclass)
+
+        NSLog("[Mycelium] Keyboard toolbar installed successfully")
+    }
+
+    /// Walk the view hierarchy to find the WKContentView.
+    private static func findContentView(in view: UIView) -> UIView? {
+        let className = NSStringFromClass(type(of: view))
+        if className == "WKContentView" {
+            return view
+        }
+        for subview in view.subviews {
+            if let found = findContentView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+}

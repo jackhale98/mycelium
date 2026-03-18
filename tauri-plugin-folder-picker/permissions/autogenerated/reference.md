@@ -6,6 +6,7 @@ Default permissions for the folder picker plugin
 
 - `allow-pick-folder`
 - `allow-restore-access`
+- `allow-setup-toolbar`
 
 ## Permission Table
 
@@ -64,6 +65,32 @@ Enables the restore_access command without any pre-configured scope.
 <td>
 
 Denies the restore_access command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`folder-picker:allow-setup-toolbar`
+
+</td>
+<td>
+
+Enables the setup_toolbar command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`folder-picker:deny-setup-toolbar`
+
+</td>
+<td>
+
+Denies the setup_toolbar command without any pre-configured scope.
 
 </td>
 </tr>

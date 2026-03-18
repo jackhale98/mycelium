@@ -17,3 +17,10 @@ pub(crate) async fn restore_access<R: Runtime>(
 ) -> Result<PickFolderResponse> {
     app.folder_picker().restore_access()
 }
+
+#[command]
+pub(crate) async fn setup_toolbar<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<PickFolderResponse> {
+    app.folder_picker().setup_toolbar()
+}

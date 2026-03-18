@@ -14,8 +14,23 @@
 			if (theme.mode === 'system') theme.applyTheme();
 		};
 		mq.addEventListener('change', handler);
+
+		// Install native iOS keyboard toolbar
+		setupNativeToolbar();
+
 		return () => mq.removeEventListener('change', handler);
 	});
+
+	async function setupNativeToolbar() {
+		if (!/iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
+		try {
+			const { invoke } = await import('@tauri-apps/api/core');
+			await invoke('plugin:folder-picker|setup_toolbar');
+			console.log('[Mycelium] Native keyboard toolbar installed');
+		} catch (e) {
+			console.warn('[Mycelium] Native toolbar setup failed (non-fatal):', e);
+		}
+	}
 </script>
 
 <div class="h-screen w-screen overflow-hidden bg-surface-0 text-surface-900 dark:bg-surface-950 dark:text-surface-100">
