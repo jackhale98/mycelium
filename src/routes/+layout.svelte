@@ -16,10 +16,10 @@
 		};
 		mq.addEventListener('change', handler);
 
-		// Expose orgConfig to native iOS toolbar pickers
+		// Expose orgConfig to native toolbar pickers (iOS + Android)
 		(window as any).__myceliumOrgConfig = orgConfig;
 
-		// Install native iOS keyboard toolbar
+		// Install native keyboard toolbar (iOS + Android)
 		setupNativeToolbar();
 
 		return () => {
@@ -29,7 +29,7 @@
 	});
 
 	async function setupNativeToolbar() {
-		if (!/iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
+		if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) return;
 		try {
 			const { invoke } = await import('@tauri-apps/api/core');
 			await invoke('plugin:folder-picker|setup_toolbar');

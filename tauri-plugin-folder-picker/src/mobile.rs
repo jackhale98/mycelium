@@ -9,6 +9,9 @@ use crate::models::*;
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_folder_picker);
 
+#[cfg(target_os = "android")]
+const PLUGIN_IDENTIFIER: &str = "com.mycelium.plugins.folderpicker";
+
 pub fn init<R: Runtime, C: DeserializeOwned>(
     _app: &AppHandle<R>,
     api: PluginApi<R, C>,
@@ -20,8 +23,8 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     }
     #[cfg(target_os = "android")]
     {
-        // Android: no native plugin yet, return stub
-        Ok(FolderPicker(None))
+        let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "FolderPickerPlugin")?;
+        Ok(FolderPicker(Some(handle)))
     }
 }
 

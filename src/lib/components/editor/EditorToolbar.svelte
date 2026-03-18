@@ -37,8 +37,8 @@
 	let hoverCol = $state(0);
 	let toolbarEl: HTMLElement;
 	let keyboardOffset = $state(0);
-	// On iOS, we use a native inputAccessoryView toolbar instead of this web toolbar
-	let isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+	// On mobile, we use a native toolbar instead of this web toolbar
+	let isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
 	/** Helper: call handler via pointerdown + preventDefault to keep editor focused on iOS */
 	function act(e: PointerEvent | MouseEvent, fn?: () => void) {
@@ -98,7 +98,7 @@
 	);
 </script>
 
-{#if editor.hasFile && !isIOS}
+{#if editor.hasFile && !isMobile}
 	<div
 		bind:this={toolbarEl}
 		class="flex h-12 items-center gap-0.5 overflow-x-auto border-t border-surface-200 bg-surface-50 px-2 dark:border-surface-700 dark:bg-surface-900"
