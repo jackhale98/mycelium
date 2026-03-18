@@ -221,11 +221,13 @@
 		return view.state.selection.main.from;
 	}
 
-	/** Replace the entire document content (used when modifying outside CM) */
+	/** Replace the entire document content, preserving cursor position */
 	export function replaceContent(newContent: string) {
 		if (!view) return;
+		const cursor = Math.min(view.state.selection.main.from, newContent.length);
 		view.dispatch({
 			changes: { from: 0, to: view.state.doc.length, insert: newContent },
+			selection: { anchor: cursor },
 		});
 	}
 
