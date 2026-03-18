@@ -130,19 +130,19 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
             BtnDef("DL", "deadline", Color.parseColor("#dc2626")),
             BtnDef("SC", "scheduled", Color.parseColor("#2563eb")),
             BtnDef("|", ""),
-            BtnDef("B", "bold", bold = true),
-            BtnDef("I", "italic"),
-            BtnDef("U", "underline"),
-            BtnDef("S", "strike"),
-            BtnDef("~c~", "code"),
-            BtnDef("=v=", "verbatim"),
+            BtnDef("\uD835\uDC01", "bold", bold = true),  // 𝐁
+            BtnDef("\uD835\uDC3C", "italic"),              // 𝐼
+            BtnDef("U\u0332", "underline"),                // U̲
+            BtnDef("S\u0336", "strike"),                   // S̶
+            BtnDef("⟨⟩", "code"),
+            BtnDef("≡", "verbatim"),
             BtnDef("|", ""),
-            BtnDef("-", "list"),
+            BtnDef("•", "list"),
             BtnDef("☐", "checkbox"),
-            BtnDef("|T|", "table"),
-            BtnDef("SRC", "srcblock"),
-            BtnDef("\"", "quote"),
-            BtnDef("Date", "timestamp"),
+            BtnDef("⊞", "table"),
+            BtnDef("{ }", "srcblock"),
+            BtnDef("\u201C", "quote"),                     // "
+            BtnDef("\uD83D\uDCC5", "timestamp"),           // 📅
         )
 
         for (def in buttons) {
@@ -191,6 +191,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
             "heading" -> showHeadingPicker(wv)
             "priority" -> showPriorityPicker(wv)
             "tag" -> showTagPicker(wv)
+            "table" -> showTablePicker(wv)
             "deadline" -> showDatePicker("deadline", wv)
             "scheduled" -> showDatePicker("scheduled", wv)
             else -> {
@@ -278,6 +279,32 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
                     .setNegativeButton("Cancel", null)
                     .create().show()
             }
+        }
+    }
+
+    private fun showTablePicker(wv: WebView) {
+        Handler(Looper.getMainLooper()).post {
+            val items = arrayOf(
+                "2 × 2 (2 cols × 2 rows)",
+                "3 × 3 (3 cols × 3 rows)",
+                "4 × 3 (4 cols × 3 rows)",
+                "5 × 3 (5 cols × 3 rows)",
+                "2 × 4 (2 cols × 4 rows)",
+                "3 × 5 (3 cols × 5 rows)"
+            )
+            val dims = arrayOf(
+                intArrayOf(2, 2), intArrayOf(3, 3), intArrayOf(4, 3),
+                intArrayOf(5, 3), intArrayOf(2, 4), intArrayOf(3, 5)
+            )
+            AlertDialog.Builder(activity)
+                .setTitle("Insert Table")
+                .setItems(items) { dialog, which ->
+                    val (cols, rows) = dims[which]
+                    wv.evaluateJavascript("window.__myceliumToolbar?.tableSize($rows, $cols)", null)
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .create().show()
         }
     }
 

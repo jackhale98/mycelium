@@ -79,6 +79,7 @@
 			list: () => onList(),
 			checkbox: () => onCheckbox(),
 			table: () => onTable(3, 3),
+			tableSize: (rows: number, cols: number) => onTable(rows, cols),
 			srcblock: () => onSrcBlock(),
 			quote: () => onQuote(),
 			timestamp: () => onTimestamp(),

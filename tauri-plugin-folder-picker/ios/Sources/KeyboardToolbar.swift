@@ -59,19 +59,19 @@ class KeyboardToolbar: UIView {
             ("DL", "deadline", .systemRed, false, 32),
             ("SC", "scheduled", .systemBlue, false, 32),
             ("|", "", nil, false, 1),
-            ("B", "bold", nil, true, 32),
-            ("I", "italic", nil, false, 32),
-            ("U", "underline", nil, false, 32),
-            ("S", "strike", nil, false, 32),
-            ("~c~", "code", nil, false, 38),
-            ("=v=", "verbatim", nil, false, 38),
+            ("𝐁", "bold", nil, true, 32),
+            ("𝐼", "italic", nil, false, 32),
+            ("U̲", "underline", nil, false, 32),
+            ("S̶", "strike", nil, false, 32),
+            ("⟨⟩", "code", nil, false, 36),
+            ("≡", "verbatim", nil, false, 28),
             ("|", "", nil, false, 1),
-            ("-", "list", nil, false, 28),
+            ("•", "list", nil, false, 28),
             ("☐", "checkbox", nil, false, 32),
-            ("|T|", "table", nil, false, 38),
-            ("SRC", "srcblock", nil, false, 42),
-            ("❝", "quote", nil, false, 28),
-            ("Date", "timestamp", nil, false, 42),
+            ("⊞", "table", nil, false, 32),
+            ("{ }", "srcblock", nil, false, 38),
+            (""", "quote", nil, false, 28),
+            ("📅", "timestamp", nil, false, 32),
         ]
 
         var x: CGFloat = 8
@@ -122,6 +122,8 @@ class KeyboardToolbar: UIView {
             showPriorityPicker(from: sender)
         case "tag":
             showTagPicker(from: sender)
+        case "table":
+            showTablePicker(from: sender)
         case "deadline":
             showDatePicker(for: "deadline", from: sender)
         case "scheduled":
@@ -221,6 +223,24 @@ class KeyboardToolbar: UIView {
                 self.presentAlert(alert)
             }
         }
+    }
+
+    private func showTablePicker(from sender: UIButton) {
+        let alert = UIAlertController(title: "Insert Table", message: nil, preferredStyle: .actionSheet)
+        let sizes = ["2 × 2", "3 × 3", "4 × 3", "5 × 3", "2 × 4", "3 × 5"]
+        let dims = [(2,2), (3,3), (4,3), (5,3), (2,4), (3,5)] // (cols, rows)
+        for (i, label) in sizes.enumerated() {
+            let (cols, rows) = dims[i]
+            alert.addAction(UIAlertAction(title: "\(label) (\(cols) cols × \(rows) rows)", style: .default) { [weak self] _ in
+                self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.tableSize(\(rows), \(cols))", completionHandler: nil)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sender
+            popover.sourceRect = sender.bounds
+        }
+        presentAlert(alert)
     }
 
     private func showTagPicker(from sender: UIButton) {
