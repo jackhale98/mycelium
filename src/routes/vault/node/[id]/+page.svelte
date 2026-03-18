@@ -16,6 +16,7 @@
 	import QuickSwitcher from '$lib/components/common/QuickSwitcher.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import type { NodeRecord, BacklinkRecord, ForwardLink, SearchResult } from '$lib/types/node';
+	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 
 	let node = $state<NodeRecord | null>(null);
 	let backlinks = $state<BacklinkRecord[]>([]);
@@ -58,8 +59,8 @@
 		// The native toolbar calls these functions via evaluateJavaScript
 		(window as any).__myceliumToolbar = {
 			link: () => onLink(),
-			heading: () => onHeading(2),
-			todo: () => onTodo('TODO'),
+			heading: () => onHeading(),
+			todo: () => cycleTodo(),
 			priority: () => onPriority('A'),
 			deadline: () => onDeadline(),
 			scheduled: () => onScheduled(),
@@ -165,7 +166,7 @@
 	function onLink() { showLinkSwitcher = true; }
 	function onCheckbox() { editorComponent?.insertLinePrefix('- [ ] '); }
 	function onList() { editorComponent?.insertLinePrefix('- '); }
-	function onHeading(level: number = 1) { editorComponent?.insertHeadingWithId(level); }
+	function onHeading(_level?: number) { editorComponent?.insertHeading(); }
 	function onSrcBlock() { editorComponent?.insertAtCursor('\n#+BEGIN_SRC \n\n#+END_SRC\n'); }
 	function onQuote() { editorComponent?.insertAtCursor('\n#+BEGIN_QUOTE\n\n#+END_QUOTE\n'); }
 	function onTable(rows: number = 2, cols: number = 2) {
@@ -190,98 +191,136 @@
 		return `<${ds} ${days[d.getDay()]}>`;
 	}
 
-	/// Find the headline line at or above the cursor, modify it, and update content
-	function modifyNearestHeadline(fn: (line: string) => string) {
-		const lines = editor.content.split('\n');
-		// Find cursor position — approximate from CodeMirror state
-		// If we can't get cursor, modify the last headline
-		let targetLine = -1;
-		for (let i = lines.length - 1; i >= 0; i--) {
-			if (/^\*+\s/.test(lines[i])) { targetLine = i; break; }
+	/** Modify the content via CodeMirror so the view stays in sync */
+	function modifyContent(fn: (content: string) => string) {
+		const newContent = fn(editor.content);
+		if (newContent !== editor.content) {
+			editorComponent?.replaceContent(newContent);
+			editor.updateContent(newContent);
 		}
-		if (targetLine === -1) return;
-		lines[targetLine] = fn(lines[targetLine]);
-		editor.updateContent(lines.join('\n'));
+	}
+
+	/** Find the headline line index at or above the cursor position */
+	function findNearestHeadlineIdx(lines: string[]): number {
+		// Use cursor position from CodeMirror if available
+		const cursorPos = editorComponent?.getCursorPos() ?? editor.content.length;
+		let charCount = 0;
+		let cursorLine = 0;
+		for (let i = 0; i < lines.length; i++) {
+			charCount += lines[i].length + 1; // +1 for newline
+			if (charCount > cursorPos) { cursorLine = i; break; }
+		}
+		// Search backwards from cursor line to find nearest heading
+		for (let i = cursorLine; i >= 0; i--) {
+			if (/^\*+\s/.test(lines[i])) return i;
+		}
+		return -1;
 	}
 
 	function onTodo(keyword: string | null) {
-		modifyNearestHeadline(line => {
+		modifyContent(content => {
+			const lines = content.split('\n');
+			const idx = findNearestHeadlineIdx(lines);
+			if (idx === -1) return content;
+			const line = lines[idx];
 			const m = line.match(/^(\*+\s+)/);
-			if (!m) return line;
+			if (!m) return content;
 			const stars = m[1];
 			let rest = line.slice(stars.length);
-			// Remove existing TODO keyword
 			const kwMatch = rest.match(/^(TODO|DONE|NEXT|WAITING|HOLD|CANCELLED|CANCELED)\s+/);
 			if (kwMatch) rest = rest.slice(kwMatch[0].length);
-			return keyword ? `${stars}${keyword} ${rest}` : `${stars}${rest}`;
+			lines[idx] = keyword ? `${stars}${keyword} ${rest}` : `${stars}${rest}`;
+			return lines.join('\n');
 		});
 	}
 
+	/** Cycle through TODO keywords: none -> TODO -> DONE -> none */
+	function cycleTodo() {
+		const lines = editor.content.split('\n');
+		const idx = findNearestHeadlineIdx(lines);
+		if (idx === -1) return;
+		const line = lines[idx];
+		const m = line.match(/^(\*+\s+)/);
+		if (!m) return;
+		const rest = line.slice(m[1].length);
+		const allKw = [...(orgConfig?.todoKeywords ?? ['TODO']), ...(orgConfig?.doneKeywords ?? ['DONE'])];
+		const kwMatch = rest.match(/^(\S+)\s/);
+		const current = kwMatch ? kwMatch[1] : null;
+		const currentIdx = current ? allKw.indexOf(current) : -1;
+		let next: string | null;
+		if (currentIdx === -1) {
+			next = allKw[0] ?? 'TODO'; // none -> first keyword
+		} else if (currentIdx === allKw.length - 1) {
+			next = null; // last -> none
+		} else {
+			next = allKw[currentIdx + 1]; // advance
+		}
+		onTodo(next);
+	}
+
 	function onPriority(priority: string | null) {
-		modifyNearestHeadline(line => {
+		modifyContent(content => {
+			const lines = content.split('\n');
+			const idx = findNearestHeadlineIdx(lines);
+			if (idx === -1) return content;
+			const line = lines[idx];
 			const m = line.match(/^(\*+\s+(?:(?:TODO|DONE|NEXT|WAITING|HOLD|CANCELLED|CANCELED)\s+)?)/);
-			if (!m) return line;
+			if (!m) return content;
 			const prefix = m[1];
 			let rest = line.slice(prefix.length);
-			// Remove existing priority
 			const prioMatch = rest.match(/^\[#[A-Z]\]\s*/);
 			if (prioMatch) rest = rest.slice(prioMatch[0].length);
-			return priority ? `${prefix}[#${priority}] ${rest}` : `${prefix}${rest}`;
+			lines[idx] = priority ? `${prefix}[#${priority}] ${rest}` : `${prefix}${rest}`;
+			return lines.join('\n');
 		});
 	}
 
 	function onDeadline() {
-		const lines = editor.content.split('\n');
-		let targetLine = -1;
-		for (let i = lines.length - 1; i >= 0; i--) {
-			if (/^\*+\s/.test(lines[i])) { targetLine = i; break; }
-		}
-		if (targetLine === -1) return;
-		// Insert DEADLINE on the line after the headline (or after planning/properties)
-		let insertAfter = targetLine;
-		for (let j = targetLine + 1; j < lines.length; j++) {
-			const t = lines[j].trim();
-			if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
-				insertAfter = j;
-				if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
-			} else break;
-		}
-		// Check if DEADLINE already exists on a nearby line
-		for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
-			if (lines[j].includes('DEADLINE:')) {
-				lines[j] = lines[j].replace(/DEADLINE:\s*<[^>]*>/, `DEADLINE: ${todayTimestamp()}`);
-				editor.updateContent(lines.join('\n'));
-				return;
+		modifyContent(content => {
+			const lines = content.split('\n');
+			const targetLine = findNearestHeadlineIdx(lines);
+			if (targetLine === -1) return content;
+			let insertAfter = targetLine;
+			for (let j = targetLine + 1; j < lines.length; j++) {
+				const t = lines[j].trim();
+				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
+					insertAfter = j;
+					if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
+				} else break;
 			}
-		}
-		lines.splice(insertAfter + 1, 0, `DEADLINE: ${todayTimestamp()}`);
-		editor.updateContent(lines.join('\n'));
+			for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
+				if (lines[j].includes('DEADLINE:')) {
+					lines[j] = lines[j].replace(/DEADLINE:\s*<[^>]*>/, `DEADLINE: ${todayTimestamp()}`);
+					return lines.join('\n');
+				}
+			}
+			lines.splice(insertAfter + 1, 0, `DEADLINE: ${todayTimestamp()}`);
+			return lines.join('\n');
+		});
 	}
 
 	function onScheduled() {
-		const lines = editor.content.split('\n');
-		let targetLine = -1;
-		for (let i = lines.length - 1; i >= 0; i--) {
-			if (/^\*+\s/.test(lines[i])) { targetLine = i; break; }
-		}
-		if (targetLine === -1) return;
-		let insertAfter = targetLine;
-		for (let j = targetLine + 1; j < lines.length; j++) {
-			const t = lines[j].trim();
-			if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
-				insertAfter = j;
-				if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
-			} else break;
-		}
-		for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
-			if (lines[j].includes('SCHEDULED:')) {
-				lines[j] = lines[j].replace(/SCHEDULED:\s*<[^>]*>/, `SCHEDULED: ${todayTimestamp()}`);
-				editor.updateContent(lines.join('\n'));
-				return;
+		modifyContent(content => {
+			const lines = content.split('\n');
+			const targetLine = findNearestHeadlineIdx(lines);
+			if (targetLine === -1) return content;
+			let insertAfter = targetLine;
+			for (let j = targetLine + 1; j < lines.length; j++) {
+				const t = lines[j].trim();
+				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
+					insertAfter = j;
+					if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
+				} else break;
 			}
-		}
-		lines.splice(insertAfter + 1, 0, `SCHEDULED: ${todayTimestamp()}`);
-		editor.updateContent(lines.join('\n'));
+			for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
+				if (lines[j].includes('SCHEDULED:')) {
+					lines[j] = lines[j].replace(/SCHEDULED:\s*<[^>]*>/, `SCHEDULED: ${todayTimestamp()}`);
+					return lines.join('\n');
+				}
+			}
+			lines.splice(insertAfter + 1, 0, `SCHEDULED: ${todayTimestamp()}`);
+			return lines.join('\n');
+		});
 	}
 
 	async function onImage() {

@@ -1,6 +1,26 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+/// Convert a user query into an FTS5 query with prefix matching.
+/// Each word gets a `*` appended so "org" matches "organic", "organization", etc.
+/// Special FTS5 characters are stripped to prevent syntax errors.
+fn make_fts_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|word| {
+            // Strip FTS5 special characters
+            let clean: String = word.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
+            if clean.is_empty() {
+                String::new()
+            } else {
+                format!("{}*", clean)
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeRecord {
     pub id: String,
@@ -211,6 +231,9 @@ fn extract_link_context(file_path: &str, target_id: &str) -> Option<String> {
 
 /// Search nodes by title (FTS5) — returns NodeRecord for backward compat
 pub fn search_nodes(conn: &Connection, query: &str) -> rusqlite::Result<Vec<NodeRecord>> {
+    // Add * to each word for prefix matching (e.g. "org" matches "organic", "organization")
+    let fts_query = make_fts_query(query);
+
     let fts_result = conn.prepare(
         "SELECT n.id, n.file, n.level, n.pos, n.todo, n.priority, n.scheduled, n.deadline, n.title, n.properties, n.olp
          FROM nodes_fts f
@@ -222,7 +245,7 @@ pub fn search_nodes(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Node
 
     match fts_result {
         Ok(mut stmt) => {
-            let rows = stmt.query_map([query], |row| {
+            let rows = stmt.query_map([&fts_query], |row| {
                 Ok(NodeRecord {
                     id: row.get(0)?,
                     file: row.get(1)?,
@@ -268,6 +291,7 @@ pub fn search_nodes(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Node
 /// Full-text search across titles AND file body content, with snippets
 pub fn search_full(conn: &Connection, query: &str) -> rusqlite::Result<Vec<SearchResult>> {
     let mut results = Vec::new();
+    let fts_query = make_fts_query(query);
 
     // Search titles via nodes_fts
     if let Ok(mut stmt) = conn.prepare(
@@ -278,7 +302,7 @@ pub fn search_full(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Searc
          ORDER BY rank
          LIMIT 25",
     ) {
-        let rows = stmt.query_map([query], |row| {
+        let rows = stmt.query_map([&fts_query], |row| {
             Ok(SearchResult {
                 id: row.get(0)?,
                 file: row.get(1)?,
@@ -302,7 +326,7 @@ pub fn search_full(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Searc
          ORDER BY rank
          LIMIT 25",
     ) {
-        let rows = stmt.query_map([query], |row| {
+        let rows = stmt.query_map([&fts_query], |row| {
             let file: String = row.get(0)?;
             let title: Option<String> = row.get(1)?;
             let snippet: Option<String> = row.get(2)?;

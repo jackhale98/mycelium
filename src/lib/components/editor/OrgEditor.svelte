@@ -180,6 +180,41 @@
 		});
 	}
 
+	/** Insert a plain heading (no :ID:) at the same level as the nearest heading */
+	export function insertHeading() {
+		if (!view) return;
+		view.focus();
+		const { from } = view.state.selection.main;
+		const line = view.state.doc.lineAt(from);
+		// Find the nearest heading above to detect level
+		let level = 2;
+		for (let i = line.number; i >= 1; i--) {
+			const l = view.state.doc.line(i).text;
+			const m = l.match(/^(\*+)\s/);
+			if (m) { level = m[1].length; break; }
+		}
+		const stars = '*'.repeat(level);
+		const text = `\n${stars} `;
+		view.dispatch({
+			changes: { from: line.to, insert: text },
+			selection: { anchor: line.to + text.length },
+		});
+	}
+
+	/** Get the current cursor position (byte offset in document) */
+	export function getCursorPos(): number {
+		if (!view) return 0;
+		return view.state.selection.main.from;
+	}
+
+	/** Replace the entire document content (used when modifying outside CM) */
+	export function replaceContent(newContent: string) {
+		if (!view) return;
+		view.dispatch({
+			changes: { from: 0, to: view.state.doc.length, insert: newContent },
+		});
+	}
+
 	function handleFallbackInput(e: Event) {
 		editor.updateContent((e.target as HTMLTextAreaElement).value);
 	}
