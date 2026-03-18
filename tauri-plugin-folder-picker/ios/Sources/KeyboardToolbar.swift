@@ -238,11 +238,8 @@ class KeyboardToolbar: UIView {
             self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)(null)", completionHandler: nil)
         }
         vc.modalPresentationStyle = .pageSheet
-        if #available(iOS 15.0, *), let sheet = vc.sheetPresentationController {
+        if let sheet = vc.sheetPresentationController {
             sheet.detents = [.medium()]
-            if #available(iOS 16.0, *) {
-                sheet.prefersGrabberIndicator = true
-            }
         }
         guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
               let rootVC = scene.windows.first?.rootViewController else { return }
