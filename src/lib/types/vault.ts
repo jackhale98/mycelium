@@ -11,4 +11,5 @@ export interface SyncResult {
 	skipped: number;
 	removed: number;
 	walk_errors?: string[];
+	broken_links?: number;
 }

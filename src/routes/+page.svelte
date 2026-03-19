@@ -70,6 +70,9 @@
 			if (syncResult.walk_errors?.length > 0) {
 				console.warn('[Mycelium] Walk errors during sync:', syncResult.walk_errors);
 			}
+			if (syncResult.broken_links && syncResult.broken_links > 0) {
+				console.warn(`[Mycelium] ${syncResult.broken_links} broken link(s) removed (source node no longer exists)`);
+			}
 
 			vault.setVault(vaultPath.trim(), files, nodes, syncResult);
 			localStorage.setItem('mycelium-vault-path', vaultPath.trim());

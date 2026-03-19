@@ -34,7 +34,11 @@
 			const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
 			vault.updateFiles(files);
 			vault.updateNodes(nodes);
-			syncMessage = `Synced: ${result.indexed} indexed, ${result.skipped} unchanged, ${result.removed} removed`;
+			let msg = `Synced: ${result.indexed} indexed, ${result.skipped} unchanged, ${result.removed} removed`;
+			if (result.broken_links && result.broken_links > 0) {
+				msg += `. ${result.broken_links} broken link(s) cleaned up.`;
+			}
+			syncMessage = msg;
 		} catch (e) {
 			syncMessage = `Error: ${e}`;
 		} finally {
@@ -51,7 +55,11 @@
 			const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
 			vault.updateFiles(files);
 			vault.updateNodes(nodes);
-			syncMessage = `Rebuilt: ${result.indexed} files indexed from scratch`;
+			let msg = `Rebuilt: ${result.indexed} files indexed from scratch`;
+			if (result.broken_links && result.broken_links > 0) {
+				msg += `. ${result.broken_links} broken link(s) cleaned up.`;
+			}
+			syncMessage = msg;
 		} catch (e) {
 			syncMessage = `Error: ${e}`;
 		} finally {

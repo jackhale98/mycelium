@@ -109,10 +109,18 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
     result.total_files = org_files.len();
 
     // Clean up orphaned links (source node no longer exists)
-    conn.execute(
-        "DELETE FROM links WHERE source NOT IN (SELECT id FROM nodes)",
+    let orphaned: usize = conn.query_row(
+        "SELECT COUNT(*) FROM links WHERE source NOT IN (SELECT id FROM nodes)",
         [],
-    ).map_err(|e| SyncError::Database(e.to_string()))?;
+        |row| row.get(0),
+    ).unwrap_or(0);
+    if orphaned > 0 {
+        conn.execute(
+            "DELETE FROM links WHERE source NOT IN (SELECT id FROM nodes)",
+            [],
+        ).map_err(|e| SyncError::Database(e.to_string()))?;
+        result.broken_links = orphaned;
+    }
 
     // Clean up orphaned headlines (file no longer exists)
     conn.execute(
@@ -183,6 +191,9 @@ pub struct SyncResult {
     /// Any non-fatal errors encountered during directory walking (e.g. permission denied)
     #[serde(default)]
     pub walk_errors: Vec<String>,
+    /// Number of broken links found (source node no longer exists)
+    #[serde(default)]
+    pub broken_links: usize,
 }
 
 #[derive(Debug)]
