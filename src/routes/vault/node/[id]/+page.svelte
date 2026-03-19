@@ -32,6 +32,11 @@
 	let showRename = $state(false);
 	let renameTitle = $state('');
 	let showLinks = $state(false);
+	let showFind = $state(false);
+	let findQuery = $state('');
+	let findCount = $state(0);
+	let findCurrent = $state(0);
+	let contentEl: HTMLDivElement;
 
 	// Auto-save debounce
 	$effect(() => {
@@ -50,8 +55,9 @@
 		const onSave = () => handleSave();
 		document.addEventListener('org-editor-save', onSave);
 		const onKey = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key === 'e') { e.preventDefault(); showSource = !showSource; }
+			if ((e.metaKey || e.ctrlKey) && e.key === 'e') { e.preventDefault(); showSource = !showSource; if (showFind) closeFind(); }
 			if ((e.metaKey || e.ctrlKey) && e.key === 'k' && showSource) { e.preventDefault(); showLinkSwitcher = true; }
+			if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !showSource) { e.preventDefault(); showFind = true; }
 		};
 		document.addEventListener('keydown', onKey);
 
@@ -268,6 +274,88 @@
 			}
 			return lines.join('\n');
 		});
+	}
+
+	// ── Find in page ──────────────────────────────────────────
+
+	function doFind() {
+		if (!contentEl || !findQuery.trim()) {
+			clearHighlights();
+			findCount = 0;
+			findCurrent = 0;
+			return;
+		}
+		clearHighlights();
+		const query = findQuery.toLowerCase();
+		const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT);
+		const matches: { node: Text; start: number }[] = [];
+		while (walker.nextNode()) {
+			const textNode = walker.currentNode as Text;
+			const text = textNode.textContent?.toLowerCase() ?? '';
+			let idx = text.indexOf(query);
+			while (idx !== -1) {
+				matches.push({ node: textNode, start: idx });
+				idx = text.indexOf(query, idx + 1);
+			}
+		}
+		// Highlight matches by wrapping in <mark>
+		// Process in reverse to preserve offsets
+		for (let i = matches.length - 1; i >= 0; i--) {
+			const { node, start } = matches[i];
+			const range = document.createRange();
+			range.setStart(node, start);
+			range.setEnd(node, start + query.length);
+			const mark = document.createElement('mark');
+			mark.className = 'mycelium-find-match';
+			mark.dataset.matchIdx = String(i);
+			mark.style.cssText = 'background:#fde68a;color:#92400e;border-radius:2px;padding:0 1px;';
+			range.surroundContents(mark);
+		}
+		findCount = matches.length;
+		findCurrent = matches.length > 0 ? 1 : 0;
+		scrollToMatch(0);
+	}
+
+	function scrollToMatch(idx: number) {
+		if (!contentEl) return;
+		const marks = contentEl.querySelectorAll('mark.mycelium-find-match');
+		marks.forEach((m, i) => {
+			(m as HTMLElement).style.background = i === idx ? '#f59e0b' : '#fde68a';
+			(m as HTMLElement).style.color = i === idx ? '#fff' : '#92400e';
+		});
+		marks[idx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	}
+
+	function findNext() {
+		if (findCount === 0) return;
+		findCurrent = (findCurrent % findCount) + 1;
+		scrollToMatch(findCurrent - 1);
+	}
+
+	function findPrev() {
+		if (findCount === 0) return;
+		findCurrent = findCurrent <= 1 ? findCount : findCurrent - 1;
+		scrollToMatch(findCurrent - 1);
+	}
+
+	function clearHighlights() {
+		if (!contentEl) return;
+		const marks = contentEl.querySelectorAll('mark.mycelium-find-match');
+		marks.forEach(mark => {
+			const parent = mark.parentNode;
+			if (parent) {
+				parent.replaceChild(document.createTextNode(mark.textContent ?? ''), mark);
+				parent.normalize(); // merge adjacent text nodes
+			}
+		});
+	}
+
+	function closeFind() {
+		clearHighlights();
+		showFind = false;
+		findQuery = '';
+		findCount = 0;
+		findCurrent = 0;
 	}
 
 	// Source mode toolbar actions
@@ -537,9 +625,20 @@
 
 		<h1 class="flex-1 truncate text-lg font-semibold">{node?.title ?? 'Loading...'}</h1>
 
+		<!-- Find in page (reading mode) -->
+		{#if !showSource}
+			<button
+				onclick={() => { showFind = !showFind; if (!showFind) closeFind(); }}
+				class="rounded-lg p-2 hover:bg-surface-100 dark:hover:bg-surface-800"
+				aria-label="Find in page"
+			>
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+			</button>
+		{/if}
+
 		<!-- Read / Edit toggle -->
 		<button
-			onclick={() => (showSource = !showSource)}
+			onclick={() => { showSource = !showSource; if (showFind) closeFind(); }}
 			class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors {showSource
 				? 'bg-mycelium-600 text-white'
 				: 'bg-surface-100 text-surface-700 dark:bg-surface-800 dark:text-surface-300'}"
@@ -586,11 +685,38 @@
 
 	{#if error}<div class="bg-red-50 px-4 py-2 text-sm text-red-600 dark:bg-red-950 dark:text-red-400">{error}</div>{/if}
 
+	<!-- Find bar -->
+	{#if showFind}
+		<div class="flex shrink-0 items-center gap-2 border-b border-surface-200 bg-surface-50 px-4 py-2 dark:border-surface-700 dark:bg-surface-900">
+			<input
+				type="text"
+				bind:value={findQuery}
+				oninput={() => doFind()}
+				onkeydown={(e) => { if (e.key === 'Enter') { e.shiftKey ? findPrev() : findNext(); } if (e.key === 'Escape') closeFind(); }}
+				placeholder="Find in page..."
+				class="flex-1 rounded-md border border-surface-200 bg-surface-0 px-3 py-1.5 text-sm focus:border-mycelium-500 focus:outline-none dark:border-surface-700 dark:bg-surface-950"
+				autofocus
+			/>
+			{#if findCount > 0}
+				<span class="text-xs text-surface-700 dark:text-surface-300">{findCurrent}/{findCount}</span>
+			{/if}
+			<button onclick={findPrev} class="rounded p-1.5 hover:bg-surface-200 dark:hover:bg-surface-700" aria-label="Previous">
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" /></svg>
+			</button>
+			<button onclick={findNext} class="rounded p-1.5 hover:bg-surface-200 dark:hover:bg-surface-700" aria-label="Next">
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+			</button>
+			<button onclick={closeFind} class="rounded p-1.5 hover:bg-surface-200 dark:hover:bg-surface-700" aria-label="Close">
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+			</button>
+		</div>
+	{/if}
+
 	<!-- Content -->
 	<div class="flex flex-1 overflow-hidden">
 		<div class="flex-1 overflow-y-auto">
 			{#if editor.hasFile}
-				<div class="mx-auto max-w-3xl p-4 pb-8">
+				<div bind:this={contentEl} class="mx-auto max-w-3xl p-4 pb-8">
 					{#if showSource}
 						<OrgEditor bind:this={editorComponent} />
 					{:else}
