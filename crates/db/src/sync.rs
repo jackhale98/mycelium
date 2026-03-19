@@ -12,6 +12,12 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
     schema::init_schema(conn).map_err(|e| SyncError::Database(e.to_string()))?;
     schema::init_fts(conn).map_err(|e| SyncError::Database(e.to_string()))?;
 
+    // Disable FK checks during sync — files are indexed one at a time, so links may
+    // reference nodes that haven't been indexed yet or were removed by git operations.
+    // We clean up orphaned links after sync completes.
+    conn.execute_batch("PRAGMA foreign_keys=OFF;")
+        .map_err(|e| SyncError::Database(e.to_string()))?;
+
     let mut result = SyncResult::default();
 
     // Walk the vault directory for .org files, collecting path + mtime
@@ -101,6 +107,23 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
     }
 
     result.total_files = org_files.len();
+
+    // Clean up orphaned links (source node no longer exists)
+    conn.execute(
+        "DELETE FROM links WHERE source NOT IN (SELECT id FROM nodes)",
+        [],
+    ).map_err(|e| SyncError::Database(e.to_string()))?;
+
+    // Clean up orphaned headlines (file no longer exists)
+    conn.execute(
+        "DELETE FROM headlines WHERE file NOT IN (SELECT file FROM files)",
+        [],
+    ).map_err(|e| SyncError::Database(e.to_string()))?;
+
+    // Re-enable FK checks
+    conn.execute_batch("PRAGMA foreign_keys=ON;")
+        .map_err(|e| SyncError::Database(e.to_string()))?;
+
     Ok(result)
 }
 

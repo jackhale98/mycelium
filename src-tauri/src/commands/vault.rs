@@ -81,11 +81,20 @@ pub async fn rebuild_database(
     let path_str = vault_path.to_string_lossy().to_string();
 
     let result = state.with_db(|conn| {
-        // Drop all existing data
+        // Drop all existing data (disable FK checks to avoid cascade issues)
         conn.execute_batch(
-            "DELETE FROM files;
+            "PRAGMA foreign_keys=OFF;
+             DELETE FROM links;
+             DELETE FROM tags;
+             DELETE FROM aliases;
+             DELETE FROM refs;
+             DELETE FROM citations;
+             DELETE FROM headlines;
+             DELETE FROM nodes;
+             DELETE FROM files;
              DELETE FROM nodes_fts;
-             DELETE FROM files_fts;"
+             DELETE FROM files_fts;
+             PRAGMA foreign_keys=ON;"
         ).map_err(|e| format!("Failed to clear database: {e}"))?;
 
         // Re-index everything
