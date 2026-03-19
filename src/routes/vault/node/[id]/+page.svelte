@@ -6,7 +6,7 @@
 	import {
 		getNode, getBacklinks, getForwardLinks, getUnlinkedMentions,
 		readFile, saveFile, listNodes, createFile,
-		exportMarkdown, exportHtml, renameNode, importImage,
+		renameNode, importImage,
 	} from '$lib/tauri/commands';
 	import RenderedView from '$lib/components/editor/RenderedView.svelte';
 	import OrgEditor from '$lib/components/editor/OrgEditor.svelte';
@@ -165,24 +165,6 @@
 	function handleInsertLink(n: NodeRecord) {
 		editorComponent?.insertAtCursor(`[[id:${n.id}][${n.title ?? n.id}]]`);
 	}
-
-	async function handleExportMd() {
-		showMenu = false;
-		if (!editor.filePath) return;
-		try {
-			const md = await exportMarkdown(editor.filePath);
-			dl(new Blob([md], {type:'text/markdown'}), (node?.title??'export')+'.md');
-		} catch (e) { error = String(e); }
-	}
-	async function handleExportHtml() {
-		showMenu = false;
-		if (!editor.filePath) return;
-		try {
-			const html = await exportHtml(editor.filePath);
-			dl(new Blob([html], {type:'text/html'}), (node?.title??'export')+'.html');
-		} catch (e) { error = String(e); }
-	}
-	function dl(b: Blob, n: string) { const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=n; a.click(); URL.revokeObjectURL(a.href); }
 
 	function startRename() {
 		showMenu = false;
@@ -675,9 +657,6 @@
 				<button class="fixed inset-0 z-30" onclick={() => (showMenu = false)} aria-label="Close"></button>
 				<div class="absolute right-0 top-full z-40 mt-1 w-48 rounded-lg border border-surface-200 bg-surface-0 py-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
 					<button onclick={startRename} class="flex w-full px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-800">Rename Node</button>
-					<div class="my-1 border-t border-surface-200 dark:border-surface-700"></div>
-					<button onclick={handleExportMd} class="flex w-full px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-800">Export Markdown</button>
-					<button onclick={handleExportHtml} class="flex w-full px-4 py-2 text-sm hover:bg-surface-100 dark:hover:bg-surface-800">Export HTML</button>
 				</div>
 			{/if}
 		</div>
