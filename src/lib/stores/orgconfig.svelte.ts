@@ -15,6 +15,15 @@ const DEFAULT_CONFIG: OrgConfig = {
 	priorities: ['A', 'B', 'C'],
 };
 
+async function pushKeywordsToBackend(keywords: string[]) {
+	try {
+		const { setTodoKeywords } = await import('$lib/tauri/commands');
+		await setTodoKeywords(keywords);
+	} catch (e) {
+		console.warn('[Mycelium] Failed to sync TODO keywords to backend:', e);
+	}
+}
+
 class OrgConfigStore {
 	todoKeywords = $state<string[]>(DEFAULT_CONFIG.todoKeywords);
 	doneKeywords = $state<string[]>(DEFAULT_CONFIG.doneKeywords);
@@ -38,11 +47,17 @@ class OrgConfigStore {
 		return [...this.todoKeywords, ...this.doneKeywords];
 	}
 
+	/** Send the current keyword set to the Rust parser. Call on app init and after updates. */
+	syncToBackend() {
+		pushKeywordsToBackend(this.allKeywords);
+	}
+
 	update(config: Partial<OrgConfig>) {
 		if (config.todoKeywords) this.todoKeywords = config.todoKeywords;
 		if (config.doneKeywords) this.doneKeywords = config.doneKeywords;
 		if (config.priorities) this.priorities = config.priorities;
 		this.persist();
+		this.syncToBackend();
 	}
 
 	private persist() {

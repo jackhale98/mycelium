@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { vault } from '$lib/stores/vault.svelte';
-	import { openVault, listFiles, listNodes } from '$lib/tauri/commands';
+	import { openVault, listFiles, listNodes, setTodoKeywords } from '$lib/tauri/commands';
+	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 	import FolderBrowser from '$lib/components/common/FolderBrowser.svelte';
 
 	let vaultPath = $state('');
@@ -36,6 +37,8 @@
 		try {
 			// On iOS, restore security-scoped bookmark access before syncing
 			await restoreIOSAccess();
+			// Push user's custom TODO keywords to the parser before sync runs
+			await setTodoKeywords(orgConfig.allKeywords).catch(() => {});
 			const syncResult = await openVault(path);
 			const files = await listFiles();
 			const nodes = await listNodes();
@@ -55,6 +58,8 @@
 		try {
 			// Restore iOS security-scoped access before syncing
 			await restoreIOSAccess();
+			// Push user's custom TODO keywords to the parser before sync runs
+			await setTodoKeywords(orgConfig.allKeywords).catch(() => {});
 			const syncResult = await openVault(vaultPath.trim());
 			const files = await listFiles();
 			const nodes = await listNodes();

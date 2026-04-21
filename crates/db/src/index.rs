@@ -126,9 +126,7 @@ fn index_all_headlines(
     content: &str,
 ) -> rusqlite::Result<()> {
     let lines: Vec<&str> = content.lines().collect();
-    let todo_keywords = [
-        "TODO", "DONE", "NEXT", "WAITING", "HOLD", "CANCELLED", "CANCELED",
-    ];
+    let todo_keywords = org_parser::headline::todo_keywords();
 
     let mut i = 0;
     while i < lines.len() {
@@ -150,12 +148,12 @@ fn index_all_headlines(
         let mut rest = trimmed[level..].trim();
 
         // Extract TODO keyword
-        let mut todo: Option<&str> = None;
+        let mut todo: Option<String> = None;
         for kw in &todo_keywords {
-            if rest.starts_with(kw) {
+            if rest.starts_with(kw.as_str()) {
                 let after = &rest[kw.len()..];
                 if after.is_empty() || after.starts_with(' ') {
-                    todo = Some(kw);
+                    todo = Some(kw.clone());
                     rest = after.trim_start();
                     break;
                 }

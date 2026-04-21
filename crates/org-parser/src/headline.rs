@@ -2,6 +2,36 @@ use crate::cst::Headline;
 use crate::link::parse_inline_content;
 use crate::property::parse_property_drawer;
 use crate::timestamp::parse_planning_line;
+use std::sync::RwLock;
+
+/// Process-global list of recognized TODO/DONE keywords.
+/// Updated via `set_todo_keywords` from the frontend's org-mode settings.
+/// Defaults cover common org-mode keywords so first-run behavior matches Emacs.
+static TODO_KEYWORDS: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+fn default_keywords() -> Vec<String> {
+    vec![
+        "TODO".to_string(), "DONE".to_string(), "NEXT".to_string(),
+        "WAITING".to_string(), "HOLD".to_string(),
+        "CANCELLED".to_string(), "CANCELED".to_string(),
+    ]
+}
+
+/// Replace the set of recognized TODO/DONE keywords used by the parser.
+/// Pass the combined list of active + done states.
+pub fn set_todo_keywords(keywords: Vec<String>) {
+    if let Ok(mut guard) = TODO_KEYWORDS.write() {
+        *guard = keywords;
+    }
+}
+
+/// Snapshot of the currently configured keywords (falls back to defaults if none set).
+pub fn todo_keywords() -> Vec<String> {
+    match TODO_KEYWORDS.read() {
+        Ok(guard) if !guard.is_empty() => guard.clone(),
+        _ => default_keywords(),
+    }
+}
 
 /// Parse a headline from a line like "** TODO [#A] Title :tag1:tag2:"
 pub fn parse_headline(line: &str) -> Option<Headline> {
@@ -24,11 +54,10 @@ pub fn parse_headline(line: &str) -> Option<Headline> {
         ""
     };
 
-    // Parse TODO keyword
-    let todo_keywords = [
-        "TODO", "DONE", "NEXT", "WAITING", "HOLD", "CANCELLED", "CANCELED",
-    ];
-    let (keyword, rest) = parse_keyword(rest, &todo_keywords);
+    // Parse TODO keyword using configured keyword set
+    let kws = todo_keywords();
+    let kw_refs: Vec<&str> = kws.iter().map(|s| s.as_str()).collect();
+    let (keyword, rest) = parse_keyword(rest, &kw_refs);
 
     // Parse priority [#A]
     let (priority, rest) = parse_priority(rest);

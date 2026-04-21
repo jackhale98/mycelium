@@ -401,6 +401,11 @@
 		return -1;
 	}
 
+	function todoKeywordRegex(): RegExp {
+		const kws = orgConfig.allKeywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+		return new RegExp(`^(${kws.join('|')})\\s+`);
+	}
+
 	function onTodo(keyword: string | null) {
 		modifyContent(content => {
 			const lines = content.split('\n');
@@ -411,7 +416,7 @@
 			if (!m) return content;
 			const stars = m[1];
 			let rest = line.slice(stars.length);
-			const kwMatch = rest.match(/^(TODO|DONE|NEXT|WAITING|HOLD|CANCELLED|CANCELED)\s+/);
+			const kwMatch = rest.match(todoKeywordRegex());
 			if (kwMatch) rest = rest.slice(kwMatch[0].length);
 			lines[idx] = keyword ? `${stars}${keyword} ${rest}` : `${stars}${rest}`;
 			return lines.join('\n');
@@ -448,7 +453,8 @@
 			const idx = findNearestHeadlineIdx(lines);
 			if (idx === -1) return content;
 			const line = lines[idx];
-			const m = line.match(/^(\*+\s+(?:(?:TODO|DONE|NEXT|WAITING|HOLD|CANCELLED|CANCELED)\s+)?)/);
+			const kws = orgConfig.allKeywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+			const m = line.match(new RegExp(`^(\\*+\\s+(?:(?:${kws})\\s+)?)`));
 			if (!m) return content;
 			const prefix = m[1];
 			let rest = line.slice(prefix.length);

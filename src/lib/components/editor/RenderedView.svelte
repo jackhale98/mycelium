@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 
 	let { content = '', vaultPath = '', onLinkClick, onContentChange }: {
 		content: string;
@@ -7,6 +8,14 @@
 		onLinkClick?: (id: string) => void;
 		onContentChange?: (newContent: string) => void;
 	} = $props();
+
+	function todoRegex(): RegExp {
+		const kws = orgConfig.allKeywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+		return new RegExp(`^(${kws.join('|')})\\s+`);
+	}
+	function isDoneKeyword(kw: string): boolean {
+		return orgConfig.doneKeywords.includes(kw);
+	}
 
 	const imgExts = new Set(['png','jpg','jpeg','gif','svg','webp','bmp','ico']);
 	let el: HTMLDivElement;
@@ -46,8 +55,8 @@
 				header.appendChild(arrow);
 
 				let rest = hm[2];
-				const tw = rest.match(/^(TODO|DONE|NEXT|WAITING|HOLD|CANCELLED)\s+/);
-				if (tw) { const b = mk('span', 'font-size:11px;font-weight:700;padding:1px 5px;border-radius:4px;' + (tw[1]==='DONE'?'color:#16a34a;background:#f0fdf4':'color:#dc2626;background:#fef2f2')); b.textContent = tw[1]; header.appendChild(b); rest = rest.slice(tw[0].length); }
+				const tw = rest.match(todoRegex());
+				if (tw) { const b = mk('span', 'font-size:11px;font-weight:700;padding:1px 5px;border-radius:4px;' + (isDoneKeyword(tw[1])?'color:#16a34a;background:#f0fdf4':'color:#dc2626;background:#fef2f2')); b.textContent = tw[1]; header.appendChild(b); rest = rest.slice(tw[0].length); }
 				const pm = rest.match(/^\[#([A-Z])\]\s*/);
 				if (pm) { const p = mk('span','font-size:11px;font-weight:700;color:#ea580c'); p.textContent='[#'+pm[1]+']'; header.appendChild(p); rest = rest.slice(pm[0].length); }
 				const tgm = rest.match(/\s+(:[a-zA-Z0-9_:]+:)\s*$/);

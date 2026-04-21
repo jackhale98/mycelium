@@ -69,6 +69,15 @@ pub async fn check_vault_changes(
     state.with_db(|conn| sync::has_changes(conn, &path_str).map_err(|e| e.to_string()))
 }
 
+/// Configure the parser's recognized TODO/DONE keywords.
+/// Pass the combined list of active + done states. Takes effect immediately
+/// for subsequent indexing; existing rows keep their old parse until re-indexed.
+#[tauri::command]
+pub async fn set_todo_keywords(keywords: Vec<String>) -> Result<(), String> {
+    org_parser::headline::set_todo_keywords(keywords);
+    Ok(())
+}
+
 /// Rebuild the database from scratch: drop all data and re-index every file.
 #[tauri::command]
 pub async fn rebuild_database(

@@ -2,8 +2,17 @@
 	import { onMount } from 'svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { editor } from '$lib/stores/editor.svelte';
+	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 
 	let { content = '' }: { content: string } = $props();
+
+	function todoRegex(): RegExp {
+		const kws = orgConfig.allKeywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+		return new RegExp(`^(${kws.join('|')})\\s+`);
+	}
+	function isDoneKeyword(kw: string): boolean {
+		return orgConfig.doneKeywords.includes(kw);
+	}
 	let container: HTMLElement;
 
 	$effect(() => {
@@ -112,8 +121,8 @@
 				const lvl = Math.min(stars + 1, 6);
 				let rest = hm[2];
 				let pre = '';
-				const tm = rest.match(/^(TODO|DONE|NEXT|WAITING|HOLD|CANCELLED)\s+/);
-				if (tm) { pre += `<span style="${tm[1] === 'DONE' ? S.done : S.todo}">${tm[1]}</span>`; rest = rest.slice(tm[0].length); }
+				const tm = rest.match(todoRegex());
+				if (tm) { pre += `<span style="${isDoneKeyword(tm[1]) ? S.done : S.todo}">${tm[1]}</span>`; rest = rest.slice(tm[0].length); }
 				const pm = rest.match(/^\[#([A-Z])\]\s*/);
 				if (pm) { pre += `<span style="${S.prio}">[#${pm[1]}]</span>`; rest = rest.slice(pm[0].length); }
 				let tagHtml = '';

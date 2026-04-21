@@ -44,6 +44,10 @@ export async function checkVaultChanges(): Promise<boolean> {
 	return invoke('check_vault_changes');
 }
 
+export async function setTodoKeywords(keywords: string[]): Promise<void> {
+	return invoke('set_todo_keywords', { keywords });
+}
+
 // Node commands
 export async function getNode(id: string): Promise<NodeRecord | null> {
 	return invoke('get_node', { id });

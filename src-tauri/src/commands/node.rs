@@ -225,9 +225,9 @@ fn update_headline_title(content: &str, node_id: &str, new_title: &str) -> Strin
                     // Preserve TODO keyword and tags if present
                     let after_stars = &hl.trim()[stars..].trim_start();
                     let mut prefix = String::new();
-                    // Check for TODO keyword
-                    for kw in &["TODO","DONE","NEXT","WAITING","HOLD","CANCELLED"] {
-                        if after_stars.starts_with(kw) && after_stars[kw.len()..].starts_with(' ') {
+                    // Check for TODO keyword (uses configured keyword set)
+                    for kw in org_parser::headline::todo_keywords() {
+                        if after_stars.starts_with(&kw) && after_stars[kw.len()..].starts_with(' ') {
                             prefix = format!("{kw} ");
                             break;
                         }

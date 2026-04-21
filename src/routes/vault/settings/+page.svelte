@@ -13,7 +13,8 @@
 	let doneInput = $state(orgConfig.doneKeywords.join(', '));
 	let prioInput = $state(orgConfig.priorities.join(', '));
 
-	function saveOrgConfig() {
+	async function saveOrgConfig() {
+		const prevKeywords = orgConfig.allKeywords.join(',');
 		orgConfig.update({
 			todoKeywords: todoInput.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
 			doneKeywords: doneInput.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
@@ -22,6 +23,23 @@
 		todoInput = orgConfig.todoKeywords.join(', ');
 		doneInput = orgConfig.doneKeywords.join(', ');
 		prioInput = orgConfig.priorities.join(', ');
+
+		// If TODO/DONE keywords changed, re-index so the parser picks them up on existing files
+		if (orgConfig.allKeywords.join(',') !== prevKeywords && !isSyncing && !isRebuilding) {
+			isRebuilding = true;
+			syncMessage = 'Re-indexing with new keywords...';
+			try {
+				const result = await rebuildDatabase();
+				const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
+				vault.updateFiles(files);
+				vault.updateNodes(nodes);
+				syncMessage = `Re-indexed ${result.indexed} files with updated TODO keywords`;
+			} catch (e) {
+				syncMessage = `Error re-indexing: ${e}`;
+			} finally {
+				isRebuilding = false;
+			}
+		}
 	}
 	let isRebuilding = $state(false);
 	let syncMessage = $state<string | null>(null);

@@ -194,9 +194,13 @@ class OrgPartialParse implements PartialParse {
 
 				const headlineChildren: BufferEntry[] = [];
 
-				// Parse TODO keyword
+				// Parse TODO keyword (uses user's configured set; falls back to defaults)
 				const afterStars = line.substring(level + 1);
-				const todoMatch = afterStars.match(/^(TODO|DONE|NEXT|WAITING|HOLD|CANCELLED|CANCELED)\s/);
+				const cfg = typeof window !== 'undefined' ? (window as any).__myceliumOrgConfig : null;
+				const cfgKws: string[] | null = cfg && cfg.allKeywords ? cfg.allKeywords : null;
+				const kws = (cfgKws && cfgKws.length ? cfgKws : ['TODO', 'DONE', 'NEXT', 'WAITING', 'HOLD', 'CANCELLED', 'CANCELED'])
+					.map((k: string) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+				const todoMatch = afterStars.match(new RegExp(`^(${kws.join('|')})\\s`));
 				if (todoMatch) {
 					const todoStart = lineStart + level + 1;
 					headlineChildren.push({

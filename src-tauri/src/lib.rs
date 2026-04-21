@@ -19,6 +19,7 @@ pub fn run() {
             commands::vault::sync_vault,
             commands::vault::rebuild_database,
             commands::vault::check_vault_changes,
+            commands::vault::set_todo_keywords,
             // Nodes
             commands::node::get_node,
             commands::node::list_nodes,
