@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-release:
-    runs-on: macos-15
+    runs-on: macos-26
     name: iOS Release
     environment: ios-release
 
@@ -27,7 +27,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Show Xcode version
-        run: xcodebuild -version
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -112,8 +114,15 @@ jobs:
             exit 1
           fi
 
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-ipa
+          path: ${{ steps.find-ipa.outputs.ipa_path }}
+          retention-days: 90
+
       - name: Upload to TestFlight
-        if: env.API_KEY_PATH != ''
+        if: env.API_KEY_PATH != '' && startsWith(github.ref, 'refs/tags/v')
         env:
           API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -123,13 +132,6 @@ jobs:
             --type ios \
             --apiKey "$API_KEY_ID" \
             --apiIssuer "$API_ISSUER_ID"
-
-      - name: Upload .ipa artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-release-ipa
-          path: ${{ steps.find-ipa.outputs.ipa_path }}
-          retention-days: 90
 
       - name: Upload IPA to GitHub Release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
