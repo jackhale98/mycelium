@@ -1,10 +1,15 @@
 use crate::cst::{InlineContent, Link, LinkType};
+use crate::timestamp::parse_timestamp;
+
+/// Recognized protocols for bare (unbracketed) links in body text
+const PLAIN_LINK_PROTOCOLS: [&str; 2] = ["https://", "http://"];
 
 /// Parse all inline content from a string, recognizing links, markup, etc.
 pub fn parse_inline_content(s: &str) -> Vec<InlineContent> {
     let mut result = Vec::new();
     let mut current_text = String::new();
     let chars: Vec<char> = s.chars().collect();
+    let offsets: Vec<usize> = s.char_indices().map(|(idx, _)| idx).collect();
     let len = chars.len();
     let mut i = 0;
 
@@ -17,6 +22,43 @@ pub fn parse_inline_content(s: &str) -> Vec<InlineContent> {
                 }
                 result.push(InlineContent::Link(link));
                 i = end;
+                continue;
+            }
+        }
+
+        // Check for <<target>> / <<<radio target>>> and <protocol:...> angle links
+        if chars[i] == '<' {
+            if let Some((link, consumed)) = parse_angle_construct(&s[offsets[i]..]) {
+                if !current_text.is_empty() {
+                    result.push(InlineContent::Text(std::mem::take(&mut current_text)));
+                }
+                result.push(InlineContent::Link(link));
+                i += consumed;
+                continue;
+            }
+        }
+
+        // Check for timestamps: <2024-01-15 Mon> / [2024-01-15]
+        if chars[i] == '<' || chars[i] == '[' {
+            if let Some((ts, consumed)) = parse_timestamp(&s[offsets[i]..]) {
+                if !current_text.is_empty() {
+                    result.push(InlineContent::Text(std::mem::take(&mut current_text)));
+                }
+                let char_len = s[offsets[i]..offsets[i] + consumed].chars().count();
+                result.push(InlineContent::Timestamp(ts));
+                i += char_len;
+                continue;
+            }
+        }
+
+        // Check for a bare URL in body text
+        if (i == 0 || !is_link_body_char(chars[i - 1])) && chars[i] == 'h' {
+            if let Some((link, consumed)) = parse_plain_link(&s[offsets[i]..]) {
+                if !current_text.is_empty() {
+                    result.push(InlineContent::Text(std::mem::take(&mut current_text)));
+                }
+                result.push(InlineContent::Link(link));
+                i += consumed;
                 continue;
             }
         }
@@ -41,6 +83,103 @@ pub fn parse_inline_content(s: &str) -> Vec<InlineContent> {
 
     // If empty input, return empty vec
     result
+}
+
+fn is_link_body_char(c: char) -> bool {
+    c.is_alphanumeric() || c == ':' || c == '/' || c == '[' || c == '<'
+}
+
+/// Parse a bare URL such as `https://example.com/page`.
+/// Returns the link and the number of chars consumed.
+fn parse_plain_link(s: &str) -> Option<(Link, usize)> {
+    let protocol = PLAIN_LINK_PROTOCOLS
+        .iter()
+        .find(|p| s.starts_with(**p))?;
+
+    let mut end = s.len();
+    for (idx, c) in s.char_indices() {
+        if c.is_whitespace() || matches!(c, '<' | '>' | '[' | ']' | '{' | '}' | '"' | '\'') {
+            end = idx;
+            break;
+        }
+    }
+
+    let mut url = &s[..end];
+    while let Some(last) = url.chars().last() {
+        if matches!(last, '.' | ',' | ';' | ':' | '!' | '?' | ')') {
+            url = &url[..url.len() - last.len_utf8()];
+        } else {
+            break;
+        }
+    }
+
+    if url.len() <= protocol.len() {
+        return None;
+    }
+
+    let link_type = if url.starts_with("https://") {
+        LinkType::Https
+    } else {
+        LinkType::Http
+    };
+
+    Some((
+        Link {
+            link_type,
+            path: url.to_string(),
+            description: None,
+            raw: url.to_string(),
+        },
+        url.chars().count(),
+    ))
+}
+
+/// Parse `<<target>>`, `<<<radio target>>>` or an angle link `<https://example.com>`.
+/// Returns the link and the number of chars consumed.
+fn parse_angle_construct(s: &str) -> Option<(Link, usize)> {
+    if s.starts_with("<<") {
+        let radio = s.starts_with("<<<");
+        let open = if radio { 3 } else { 2 };
+        let close_marker = if radio { ">>>" } else { ">>" };
+        let inner_end = s[open..].find(close_marker)? + open;
+        let inner = &s[open..inner_end];
+        if inner.is_empty() || inner.contains('<') || inner.contains('>') {
+            return None;
+        }
+        let raw = &s[..inner_end + close_marker.len()];
+        return Some((
+            Link {
+                link_type: LinkType::Target,
+                path: inner.to_string(),
+                description: None,
+                raw: raw.to_string(),
+            },
+            raw.chars().count(),
+        ));
+    }
+
+    let close = s.find('>')?;
+    let inner = &s[1..close];
+    if inner.is_empty() || inner.chars().any(|c| c.is_whitespace()) {
+        return None;
+    }
+    let colon = inner.find(':')?;
+    if colon == 0 || !inner[..colon].chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+
+    let (link_type, path) = parse_link_type(inner);
+    let raw = &s[..=close];
+
+    Some((
+        Link {
+            link_type,
+            path,
+            description: None,
+            raw: raw.to_string(),
+        },
+        raw.chars().count(),
+    ))
 }
 
 /// Try to parse an org-mode link starting at position i: [[path][description]] or [[path]]
@@ -104,7 +243,11 @@ fn parse_org_link(chars: &[char], start: usize) -> Option<(Link, usize)> {
 }
 
 fn parse_link_type(path: &str) -> (LinkType, String) {
-    if let Some(rest) = path.strip_prefix("id:") {
+    if let Some(rest) = path.strip_prefix('*') {
+        (LinkType::Heading, rest.to_string())
+    } else if let Some(rest) = path.strip_prefix('#') {
+        (LinkType::CustomId, rest.to_string())
+    } else if let Some(rest) = path.strip_prefix("id:") {
         (LinkType::Id, rest.to_string())
     } else if let Some(rest) = path.strip_prefix("file:") {
         (LinkType::File, rest.to_string())
@@ -289,5 +432,82 @@ mod tests {
         let content = parse_inline_content("some =verb= text");
         assert_eq!(content.len(), 3);
         assert!(matches!(&content[1], InlineContent::Verbatim(s) if s == "verb"));
+    }
+
+    #[test]
+    fn test_plain_url() {
+        let content = parse_inline_content("See https://example.com/page for details.");
+        let links = extract_links_from_content(&content);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].link_type, LinkType::Https);
+        assert_eq!(links[0].path, "https://example.com/page");
+    }
+
+    #[test]
+    fn test_plain_url_trailing_punctuation() {
+        let content = parse_inline_content("Go to http://example.com.");
+        let links = extract_links_from_content(&content);
+        assert_eq!(links[0].path, "http://example.com");
+        assert_eq!(links[0].link_type, LinkType::Http);
+    }
+
+    #[test]
+    fn test_angle_link() {
+        let content = parse_inline_content("Read <https://example.com/x> now");
+        let links = extract_links_from_content(&content);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].link_type, LinkType::Https);
+        assert_eq!(links[0].path, "https://example.com/x");
+        assert_eq!(links[0].raw, "<https://example.com/x>");
+    }
+
+    #[test]
+    fn test_bracket_link_not_double_counted() {
+        let content = parse_inline_content("[[https://example.com][Site]]");
+        let links = extract_links_from_content(&content);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].description.as_deref(), Some("Site"));
+    }
+
+    #[test]
+    fn test_internal_link_types() {
+        let content = parse_inline_content("[[*Some Headline]] and [[#custom-id]]");
+        let links = extract_links_from_content(&content);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].link_type, LinkType::Heading);
+        assert_eq!(links[0].path, "Some Headline");
+        assert_eq!(links[1].link_type, LinkType::CustomId);
+        assert_eq!(links[1].path, "custom-id");
+    }
+
+    #[test]
+    fn test_radio_target() {
+        let content = parse_inline_content("A <<my target>> here");
+        let links = extract_links_from_content(&content);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].link_type, LinkType::Target);
+        assert_eq!(links[0].path, "my target");
+    }
+
+    #[test]
+    fn test_inline_timestamp() {
+        let content = parse_inline_content("Meeting on <2024-01-15 Mon 10:00> ok");
+        assert_eq!(content.len(), 3);
+        assert!(
+            matches!(&content[1], InlineContent::Timestamp(ts) if ts.raw == "<2024-01-15 Mon 10:00>")
+        );
+    }
+
+    #[test]
+    fn test_inline_inactive_timestamp() {
+        let content = parse_inline_content("Logged [2024-01-15 Mon]");
+        assert!(matches!(&content[1], InlineContent::Timestamp(ts) if !ts.active));
+    }
+
+    #[test]
+    fn test_checkbox_not_a_timestamp() {
+        let content = parse_inline_content("[ ] not a timestamp");
+        assert_eq!(content.len(), 1);
+        assert!(matches!(&content[0], InlineContent::Text(_)));
     }
 }

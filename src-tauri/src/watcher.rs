@@ -1,28 +1,30 @@
-use crate::state::AppState;
+use crate::fsutil;
+use crate::state::{AppState, WatcherHandle};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Start watching a vault directory for .org file changes.
 /// When changes are detected, re-indexes the changed files and emits db-updated.
-pub fn start_watcher(
-    app: AppHandle,
-    state: Arc<AppState>,
-    vault_path: String,
-) -> Result<(), String> {
+/// The returned handle stops the watcher thread.
+pub fn start_watcher(app: AppHandle, vault_path: String) -> WatcherHandle {
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = Arc::clone(&stop);
+
     std::thread::spawn(move || {
-        if let Err(e) = run_watcher(app, state, &vault_path) {
+        if let Err(e) = run_watcher(app, thread_stop, &vault_path) {
             eprintln!("File watcher error: {e}");
         }
     });
 
-    Ok(())
+    WatcherHandle::new(stop)
 }
 
-fn run_watcher(app: AppHandle, state: Arc<AppState>, vault_path: &str) -> Result<(), String> {
+fn run_watcher(app: AppHandle, stop: Arc<AtomicBool>, vault_path: &str) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
 
     let mut watcher = RecommendedWatcher::new(
@@ -44,6 +46,10 @@ fn run_watcher(app: AppHandle, state: Arc<AppState>, vault_path: &str) -> Result
     let mut pending_files = std::collections::HashSet::new();
 
     loop {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+
         match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(event) => {
                 match event.kind {
@@ -63,9 +69,14 @@ fn run_watcher(app: AppHandle, state: Arc<AppState>, vault_path: &str) -> Result
                 // Process pending files if debounce period passed
                 if !pending_files.is_empty() && last_event.elapsed() >= Duration::from_millis(500)
                 {
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let files: Vec<String> = pending_files.drain().collect();
-                    reindex_files(&state, &files);
-                    let _ = app.emit("db-updated", ());
+                    let state = app.state::<AppState>();
+                    if reindex_files(&state, &files) {
+                        let _ = app.emit("db-updated", ());
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -74,25 +85,38 @@ fn run_watcher(app: AppHandle, state: Arc<AppState>, vault_path: &str) -> Result
         }
     }
 
+    let _ = watcher.unwatch(Path::new(vault_path));
+
     Ok(())
 }
 
-fn reindex_files(state: &AppState, files: &[String]) {
-    let guard = state.db.lock().ok();
-    let conn = match guard.as_ref().and_then(|g| g.as_ref()) {
-        Some(c) => c,
-        None => return,
-    };
+/// Re-index externally changed files. Files the app itself just wrote are skipped
+/// so an in-app save is not indexed twice. Returns true if anything changed.
+fn reindex_files(state: &AppState, files: &[String]) -> bool {
+    let mut changed = false;
 
     for file_path in files {
         let path = Path::new(file_path);
         if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                let _ = db::index::index_file(conn, file_path, &content);
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            if state.take_own_write(file_path, &fsutil::content_hash(&content)) {
+                continue;
             }
+            let indexed = state.with_db(|conn| {
+                db::index::index_file(conn, file_path, &content).map_err(|e| e.to_string())
+            });
+            changed |= indexed.is_ok();
         } else {
-            // File was deleted
-            let _ = conn.execute("DELETE FROM files WHERE file = ?1", [file_path]);
+            let deleted = state.with_db(|conn| {
+                conn.execute("DELETE FROM files WHERE file = ?1", [file_path])
+                    .map_err(|e| e.to_string())
+            });
+            changed |= matches!(deleted, Ok(n) if n > 0);
         }
     }
+
+    changed
 }

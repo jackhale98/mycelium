@@ -1,17 +1,12 @@
 <script lang="ts">
 	import { navigation } from '$lib/stores/navigation.svelte';
-	import { getOrCreateDaily, listDailyNotes } from '$lib/tauri/commands';
+	import { getOrCreateDaily, listDailyNotes, localDate, localTimestamp } from '$lib/tauri/commands';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import type { NodeRecord } from '$lib/types/node';
 
 	let dailyNotes = $state<NodeRecord[]>([]);
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
-
-	function todayString(): string {
-		const d = new Date();
-		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-	}
 
 	$effect(() => {
 		loadDailyNotes();
@@ -29,7 +24,7 @@
 		isLoading = true;
 		error = null;
 		try {
-			const node = await getOrCreateDaily(todayString());
+			const node = await getOrCreateDaily(localDate(), localTimestamp());
 			navigation.navigateToNode(node.id);
 		} catch (e) {
 			error = String(e);
@@ -41,7 +36,7 @@
 	async function openDate(date: string) {
 		isLoading = true;
 		try {
-			const node = await getOrCreateDaily(date);
+			const node = await getOrCreateDaily(date, localTimestamp());
 			navigation.navigateToNode(node.id);
 		} catch (e) {
 			error = String(e);
@@ -98,7 +93,7 @@
 				class="w-full rounded-xl bg-mycelium-600 px-6 py-4 text-left text-white shadow-md transition-colors hover:bg-mycelium-700 disabled:opacity-50"
 			>
 				<div class="text-lg font-bold">Today</div>
-				<div class="mt-1 text-sm opacity-80">{todayString()}</div>
+				<div class="mt-1 text-sm opacity-80">{localDate()}</div>
 			</button>
 
 			<!-- Quick access: last 7 days -->

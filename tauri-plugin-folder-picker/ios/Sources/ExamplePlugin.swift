@@ -12,7 +12,29 @@ class FolderPickerPlugin: Plugin {
     override init() {
         super.init()
         // Auto-restore bookmark access on plugin init (app launch)
-        _ = Self.restoreBookmarkAccess()
+        _ = restoreBookmarkAccess()
+    }
+
+    deinit {
+        activeSecurityScopedURL?.stopAccessingSecurityScopedResource()
+    }
+
+    /// Start security-scoped access for `url`, releasing whatever was held before.
+    /// start/stopAccessingSecurityScopedResource must be balanced, so at most one
+    /// URL is held at a time and re-acquiring the same URL is a no-op.
+    private func beginSecurityScopedAccess(to url: URL) -> Bool {
+        if let active = activeSecurityScopedURL, active == url {
+            return true
+        }
+
+        activeSecurityScopedURL?.stopAccessingSecurityScopedResource()
+        activeSecurityScopedURL = nil
+
+        let accessing = url.startAccessingSecurityScopedResource()
+        if accessing {
+            activeSecurityScopedURL = url
+        }
+        return accessing
     }
 
     @objc public func pickFolder(_ invoke: Invoke) throws {
@@ -78,17 +100,17 @@ class FolderPickerPlugin: Plugin {
     /// Restore security-scoped access from a stored bookmark.
     /// Called automatically on init and can be called explicitly via command.
     @objc public func restoreAccess(_ invoke: Invoke) throws {
-        if let path = Self.restoreBookmarkAccess() {
+        if let path = restoreBookmarkAccess() {
             invoke.resolve(["path": path])
         } else {
             invoke.resolve(["path": NSNull()])
         }
     }
 
-    /// Static helper: resolve stored bookmark and activate security-scoped access.
+    /// Resolve the stored bookmark and activate security-scoped access.
     /// Returns the path if successful, nil otherwise.
     @discardableResult
-    static func restoreBookmarkAccess() -> String? {
+    func restoreBookmarkAccess() -> String? {
         guard let bookmarkData = UserDefaults.standard.data(forKey: "mycelium_vault_bookmark") else {
             return nil
         }
@@ -103,7 +125,7 @@ class FolderPickerPlugin: Plugin {
             )
 
             // Activate security-scoped access for the entire directory (includes subdirectories)
-            let accessing = url.startAccessingSecurityScopedResource()
+            let accessing = beginSecurityScopedAccess(to: url)
             NSLog("[Mycelium] Restored bookmark access for: %@ (accessing=%d, stale=%d)", url.path, accessing ? 1 : 0, isStale ? 1 : 0)
 
             if isStale {
@@ -137,15 +159,9 @@ extension FolderPickerPlugin: UIDocumentPickerDelegate {
             return
         }
 
-        // Stop previous security-scoped access if any
-        activeSecurityScopedURL?.stopAccessingSecurityScopedResource()
-
-        let accessing = url.startAccessingSecurityScopedResource()
+        // Releases any previously held URL before starting the new one
+        let accessing = beginSecurityScopedAccess(to: url)
         NSLog("[Mycelium] Picked folder: %@ (accessing=%d)", url.path, accessing ? 1 : 0)
-
-        if accessing {
-            activeSecurityScopedURL = url
-        }
 
         // Enumerate subdirectories to verify access
         if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {

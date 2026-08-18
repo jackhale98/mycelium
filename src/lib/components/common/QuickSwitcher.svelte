@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { vault } from '$lib/stores/vault.svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
-	import { createFile, listNodes, listFiles } from '$lib/tauri/commands';
+	import { createFile, listNodes, listFiles, localTimestamp } from '$lib/tauri/commands';
 	import type { NodeRecord } from '$lib/types/node';
 
 	let {
@@ -57,13 +57,14 @@
 		if (!query.trim() || creating) return;
 		creating = true;
 		try {
-			await createFile(query.trim());
+			const createdPath = await createFile(query.trim(), localTimestamp());
 			const nodes = await listNodes();
 			const files = await listFiles();
 			vault.updateNodes(nodes);
 			vault.updateFiles(files);
-			// Find the newly created node
-			const newNode = nodes.find(n => n.title === query.trim());
+			// Match on the file just written: titles are not unique.
+			const newNode = nodes.find(n => n.file === createdPath)
+				?? nodes.find(n => n.title === query.trim());
 			if (newNode) {
 				if (mode === 'insert-link') {
 					oninsert?.(newNode);

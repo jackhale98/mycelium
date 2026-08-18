@@ -301,7 +301,7 @@ function buildFiles(): FileRecord[] {
 	return Object.keys(FILES).map(file => ({
 		file,
 		title: FILES[file].match(/#\+TITLE:\s+(.+)/)?.[1] ?? file.split('/').pop()?.replace('.org', '') ?? '',
-		hash: Math.random().toString(36).substring(2),
+		hash: contentHash(FILES[file]),
 		mtime: '1705312800',
 	}));
 }
@@ -322,6 +322,113 @@ for (const [file, content] of Object.entries(FILES)) {
 			MOCK_TAGS[fileNode.id] = tags;
 		}
 	}
+}
+
+// ── Content hashing / mutation ─────────────────────────────────────────────
+// The real backend hands out a content hash with every read and refuses a save
+// whose expected_hash no longer matches disk. The mock reproduces both so the
+// browser preview exercises the same conflict path.
+
+const CONFLICT_PREFIX = 'CONFLICT:';
+
+function contentHash(content: string): string {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < content.length; i++) {
+		h ^= content.charCodeAt(i);
+		h = Math.imul(h, 0x01000193) >>> 0;
+	}
+	return h.toString(16).padStart(8, '0');
+}
+
+function slugify(title: string): string {
+	return title
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '_')
+		.replace(/^_+|_+$/g, '');
+}
+
+function fileContent(filePath: string): string | null {
+	if (FILES[filePath] !== undefined) return FILES[filePath];
+	const node = MOCK_NODES.find(n => n.file === filePath);
+	return node ? FILES[node.file] ?? null : null;
+}
+
+function writeFile(filePath: string, content: string): string {
+	FILES[filePath] = content;
+	const hash = contentHash(content);
+	const record = MOCK_FILES.find(f => f.file === filePath);
+	if (record) {
+		record.hash = hash;
+		record.title = content.match(/#\+TITLE:\s+(.+)/)?.[1] ?? record.title;
+	} else {
+		MOCK_FILES.push({
+			file: filePath,
+			title: content.match(/#\+TITLE:\s+(.+)/)?.[1] ?? filePath.split('/').pop() ?? filePath,
+			hash,
+			mtime: String(Math.floor(Date.now() / 1000)),
+		});
+	}
+	return hash;
+}
+
+/** Mirrors `daily::ensure_daily`: look the date up, create it with the given local timestamp. */
+function ensureDaily(date: string, timestamp?: string): NodeRecord {
+	const existing = MOCK_NODES.find(n => n.level === 0 && n.title === date);
+	if (existing) return existing;
+
+	const stamp = timestamp ?? `${date.replace(/-/g, '')}000000`;
+	const filePath = `/vault/daily/${stamp}-${slugify(date)}.org`;
+	const id = `node-daily-${stamp}`;
+
+	writeFile(filePath, `:PROPERTIES:\n:ID: ${id}\n:END:\n#+TITLE: ${date}\n\n`);
+
+	const node: NodeRecord = {
+		id,
+		file: filePath,
+		level: 0,
+		pos: 0,
+		todo: null,
+		priority: null,
+		scheduled: null,
+		deadline: null,
+		title: date,
+		properties: `{"ID":"${id}"}`,
+		olp: '[]',
+	};
+	MOCK_NODES.push(node);
+	return node;
+}
+
+/** The whole mock vault as graph data: every node, deduplicated id links between them. */
+function buildGraphData(): GraphData {
+	const linkCounts: Record<string, number> = {};
+	for (const l of ALL_LINKS) {
+		linkCounts[l.sourceNodeId] = (linkCounts[l.sourceNodeId] ?? 0) + 1;
+		linkCounts[l.targetNodeId] = (linkCounts[l.targetNodeId] ?? 0) + 1;
+	}
+
+	// Include ALL nodes in the graph (not just file-level)
+	const allNodeIds = new Set(MOCK_NODES.map(n => n.id));
+	const nodes = MOCK_NODES.map(n => ({
+		id: n.id,
+		title: n.title,
+		tags: MOCK_TAGS[n.id] ?? [],
+		link_count: linkCounts[n.id] ?? 0,
+	}));
+
+	// Deduplicate links between nodes that exist
+	const seen = new Set<string>();
+	const links = ALL_LINKS
+		.filter(l => allNodeIds.has(l.sourceNodeId) && allNodeIds.has(l.targetNodeId))
+		.filter(l => {
+			const key = `${l.sourceNodeId}->${l.targetNodeId}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		})
+		.map(l => ({ source: l.sourceNodeId, target: l.targetNodeId }));
+
+	return { nodes, links };
 }
 
 // ── Mock command handlers ──────────────────────────────────────────────────
@@ -411,56 +518,77 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 
 	// Read file: return the actual org content
 	read_file: (args) => {
-		const filePath = args.filePath as string;
-		// Direct file path match
-		if (FILES[filePath]) return FILES[filePath];
-		// Try matching by node file field
-		const node = MOCK_NODES.find(n => n.file === filePath);
-		if (node && FILES[node.file]) return FILES[node.file];
-		return '#+TITLE: Not Found\n\nFile not found in demo vault.\n';
+		return fileContent(args.filePath as string)
+			?? '#+TITLE: Not Found\n\nFile not found in demo vault.\n';
 	},
 
-	save_file: () => undefined,
-	create_file: () => '/vault/new-note.org',
+	read_file_meta: (args) => {
+		const content = fileContent(args.filePath as string)
+			?? '#+TITLE: Not Found\n\nFile not found in demo vault.\n';
+		return { content, hash: contentHash(content) };
+	},
 
-	get_graph_data: () => {
-		const linkCounts: Record<string, number> = {};
-		for (const l of ALL_LINKS) {
-			linkCounts[l.sourceNodeId] = (linkCounts[l.sourceNodeId] ?? 0) + 1;
-			linkCounts[l.targetNodeId] = (linkCounts[l.targetNodeId] ?? 0) + 1;
+	save_file: (args) => {
+		const filePath = args.filePath as string;
+		const content = args.content as string;
+		const expected = args.expectedHash as string | undefined;
+
+		if (expected !== undefined && expected !== null) {
+			const current = fileContent(filePath) ?? '';
+			if (contentHash(current) !== expected) {
+				throw new Error(
+					`${CONFLICT_PREFIX} The file changed on disk since it was opened. Reload to see the current version.`
+				);
+			}
 		}
 
-		// Include ALL nodes in the graph (not just file-level)
-		const allNodeIds = new Set(MOCK_NODES.map(n => n.id));
-		const graphNodes = MOCK_NODES.map(n => ({
-			id: n.id,
-			title: n.title,
-			tags: MOCK_TAGS[n.id] ?? [],
-			link_count: linkCounts[n.id] ?? 0,
-		}));
-
-		// Deduplicate links between nodes that exist
-		const seen = new Set<string>();
-		const graphLinks = ALL_LINKS
-			.filter(l => allNodeIds.has(l.sourceNodeId) && allNodeIds.has(l.targetNodeId))
-			.filter(l => {
-				const key = `${l.sourceNodeId}->${l.targetNodeId}`;
-				if (seen.has(key)) return false;
-				seen.add(key);
-				return true;
-			})
-			.map(l => ({ source: l.sourceNodeId, target: l.targetNodeId }));
-
-		return { nodes: graphNodes, links: graphLinks } as GraphData;
+		return writeFile(filePath, content);
 	},
 
-	get_or_create_daily: (args) => {
-		const date = args.date as string;
-		const existing = MOCK_NODES.find(n => n.title === date);
-		if (existing) return existing;
-		// Return the existing daily note as fallback
-		return MOCK_NODES.find(n => n.title?.match(/^\d{4}-\d{2}-\d{2}/)) ?? MOCK_NODES[0];
+	create_file: (args) => {
+		const title = args.title as string;
+		const timestamp = args.timestamp as string;
+		const filePath = `/vault/${timestamp}-${slugify(title) || 'untitled'}.org`;
+		const id = `node-${timestamp}`;
+
+		writeFile(filePath, `:PROPERTIES:\n:ID: ${id}\n:END:\n#+TITLE: ${title}\n`);
+		MOCK_NODES.push({
+			id,
+			file: filePath,
+			level: 0,
+			pos: 0,
+			todo: null,
+			priority: null,
+			scheduled: null,
+			deadline: null,
+			title,
+			properties: `{"ID":"${id}"}`,
+			olp: '[]',
+		});
+		return filePath;
 	},
+
+	get_graph_data: () => buildGraphData(),
+
+	get_graph_data_limited: (args) => {
+		const limit = Math.max(1, Number(args.limit ?? 1));
+		const full = buildGraphData();
+		const nodes = [...full.nodes].sort((a, b) => b.link_count - a.link_count).slice(0, limit);
+		const ids = new Set(nodes.map(n => n.id));
+		const links = full.links.filter(l => ids.has(l.source) && ids.has(l.target));
+		return {
+			nodes,
+			links,
+			total_nodes: full.nodes.length,
+			total_links: full.links.length,
+			returned_nodes: nodes.length,
+			returned_links: links.length,
+			truncated: nodes.length < full.nodes.length,
+		};
+	},
+
+	get_or_create_daily: (args) =>
+		ensureDaily(args.date as string, args.timestamp as string | undefined),
 
 	list_daily_notes: () => MOCK_NODES.filter(n => /^\d{4}-\d{2}-\d{2}/.test(n.title ?? '')),
 
@@ -549,5 +677,15 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 		}
 		return results;
 	},
-	quick_capture: () => '/vault/daily/20260315-2026_03_15.org',
+	quick_capture: (args) => {
+		const text = args.text as string;
+		const date = args.localDate as string;
+		const time = args.localTime as string;
+
+		const node = ensureDaily(date, `${date.replace(/-/g, '')}${time.replace(':', '')}00`);
+		let content = FILES[node.file] ?? '';
+		if (content && !content.endsWith('\n')) content += '\n';
+		writeFile(node.file, `${content}- [${time}] ${text}\n`);
+		return node.file;
+	},
 };

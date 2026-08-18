@@ -1,4 +1,5 @@
 import { ViewPlugin, type EditorView } from '@codemirror/view';
+import { parseCheckboxLine, recomputeCookies, setCheckbox } from '$lib/org';
 
 /// Extension that toggles org-mode checkboxes when clicked: [ ] <-> [X]
 export function orgCheckboxToggle() {
@@ -17,31 +18,30 @@ export function orgCheckboxToggle() {
 				if (pos === null) return;
 
 				const line = this.view.state.doc.lineAt(pos);
-				const lineText = line.text;
-
-				// Check if the click is near a checkbox
-				const unchecked = lineText.indexOf('[ ]');
-				const checked = lineText.indexOf('[X]');
-				const checkedLower = lineText.indexOf('[x]');
+				// The list item's own box, not the first bracket text on the line.
+				const item = parseCheckboxLine(line.text);
+				if (!item || item.offset < 0) return;
 
 				const posInLine = pos - line.from;
+				if (posInLine < item.offset || posInLine > item.offset + 3) return;
 
-				if (unchecked !== -1 && posInLine >= unchecked && posInLine <= unchecked + 3) {
-					event.preventDefault();
-					this.view.dispatch({
-						changes: { from: line.from + unchecked, to: line.from + unchecked + 3, insert: '[X]' },
-					});
-				} else if (checked !== -1 && posInLine >= checked && posInLine <= checked + 3) {
-					event.preventDefault();
-					this.view.dispatch({
-						changes: { from: line.from + checked, to: line.from + checked + 3, insert: '[ ]' },
-					});
-				} else if (checkedLower !== -1 && posInLine >= checkedLower && posInLine <= checkedLower + 3) {
-					event.preventDefault();
-					this.view.dispatch({
-						changes: { from: line.from + checkedLower, to: line.from + checkedLower + 3, insert: '[ ]' },
-					});
+				event.preventDefault();
+
+				const lines = this.view.state.doc.toJSON();
+				const lineIndex = this.view.state.doc.lineAt(pos).number - 1;
+				const next = recomputeCookies(
+					setCheckbox(lines, lineIndex, item.state === 'checked' ? 'unchecked' : 'checked')
+				);
+
+				// Dispatch only the lines that actually changed, so the cursor and
+				// undo history survive a toggle that also updates parent cookies.
+				const changes = [];
+				for (let i = 0; i < lines.length; i += 1) {
+					if (lines[i] === next[i]) continue;
+					const target = this.view.state.doc.line(i + 1);
+					changes.push({ from: target.from, to: target.to, insert: next[i] });
 				}
+				if (changes.length > 0) this.view.dispatch({ changes });
 			}
 
 			destroy() {

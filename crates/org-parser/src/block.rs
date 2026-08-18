@@ -1,4 +1,5 @@
 use crate::cst::Block;
+use crate::headline::is_headline;
 
 /// Parse a source/quote/example block from lines.
 /// Returns the block and number of lines consumed.
@@ -29,6 +30,12 @@ pub fn parse_block(lines: &[&str], start: usize) -> Option<(Block, usize)> {
 
     while i < lines.len() {
         let current = lines[i];
+
+        // Headlines take precedence: an unterminated block never swallows them
+        if is_headline(current) {
+            return None;
+        }
+
         raw.push_str(current);
 
         if current.trim().eq_ignore_ascii_case(&end_marker) {
@@ -69,6 +76,17 @@ mod tests {
         assert_eq!(block.block_type, "SRC");
         assert_eq!(block.parameters, "python");
         assert_eq!(block.contents, "print(\"hello\")\n");
+    }
+
+    #[test]
+    fn test_unterminated_block_stops_at_headline() {
+        let lines = vec![
+            "#+BEGIN_SRC python",
+            "print(1)",
+            "* Next Headline",
+            "#+END_SRC",
+        ];
+        assert!(parse_block(&lines, 0).is_none());
     }
 
     #[test]

@@ -3,46 +3,84 @@
 	import { vault } from '$lib/stores/vault.svelte';
 	import { theme, type ThemeMode } from '$lib/stores/theme.svelte';
 	import { syncVault, rebuildDatabase, listFiles, listNodes } from '$lib/tauri/commands';
-	import { orgConfig } from '$lib/stores/orgconfig.svelte';
+	import type { SyncResult } from '$lib/types/vault';
+	import {
+		orgConfig,
+		parseConfigList,
+		validateKeywords,
+		validatePriorities,
+	} from '$lib/stores/orgconfig.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 
 	let isSyncing = $state(false);
+	let isRebuilding = $state(false);
+	let syncMessage = $state<string | null>(null);
 
 	// Editable copies of org config
 	let todoInput = $state(orgConfig.todoKeywords.join(', '));
 	let doneInput = $state(orgConfig.doneKeywords.join(', '));
 	let prioInput = $state(orgConfig.priorities.join(', '));
 
+	const todoList = $derived(parseConfigList(todoInput));
+	const doneList = $derived(parseConfigList(doneInput));
+	const prioList = $derived(parseConfigList(prioInput));
+
+	const todoError = $derived(validateKeywords(todoList));
+	const doneError = $derived(validateKeywords(doneList));
+	const prioError = $derived(validatePriorities(prioList));
+	const keywordSetError = $derived(
+		todoList.length + doneList.length === 0
+			? 'At least one keyword is required.'
+			: todoError || doneError
+				? null
+				: validateKeywords([...todoList, ...doneList])
+	);
+	const orgConfigError = $derived(todoError ?? doneError ?? prioError ?? keywordSetError);
+
 	async function saveOrgConfig() {
+		if (orgConfigError) return;
+
 		const prevKeywords = orgConfig.allKeywords.join(',');
-		orgConfig.update({
-			todoKeywords: todoInput.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
-			doneKeywords: doneInput.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
-			priorities: prioInput.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
-		});
+		const keywordsChanged = [...todoList, ...doneList].join(',') !== prevKeywords;
+
+		try {
+			await orgConfig.update({
+				todoKeywords: todoList,
+				doneKeywords: doneList,
+				priorities: prioList,
+			});
+		} catch (e) {
+			syncMessage = `Error saving org settings: ${e}`;
+			return;
+		}
+
 		todoInput = orgConfig.todoKeywords.join(', ');
 		doneInput = orgConfig.doneKeywords.join(', ');
 		prioInput = orgConfig.priorities.join(', ');
 
-		// If TODO/DONE keywords changed, re-index so the parser picks them up on existing files
-		if (orgConfig.allKeywords.join(',') !== prevKeywords && !isSyncing && !isRebuilding) {
-			isRebuilding = true;
-			syncMessage = 'Re-indexing with new keywords...';
-			try {
-				const result = await rebuildDatabase();
-				const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
-				vault.updateFiles(files);
-				vault.updateNodes(nodes);
-				syncMessage = `Re-indexed ${result.indexed} files with updated TODO keywords`;
-			} catch (e) {
-				syncMessage = `Error re-indexing: ${e}`;
-			} finally {
-				isRebuilding = false;
-			}
+		// The parser now holds the new keywords, so re-indexing writes the new set.
+		if (!keywordsChanged) return;
+
+		if (isSyncing || isRebuilding) {
+			syncMessage =
+				'Keywords saved, but the index still uses the old set. Run "Rebuild DB" once the current operation finishes.';
+			return;
+		}
+
+		isRebuilding = true;
+		syncMessage = 'Re-indexing with new keywords...';
+		try {
+			const result = await rebuildDatabase();
+			const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
+			vault.updateFiles(files);
+			vault.updateNodes(nodes);
+			syncMessage = `Re-indexed ${result.indexed} files with updated TODO keywords`;
+		} catch (e) {
+			syncMessage = `Error re-indexing: ${e}. Keywords are saved but the index still uses the old set — run "Rebuild DB" to finish.`;
+		} finally {
+			isRebuilding = false;
 		}
 	}
-	let isRebuilding = $state(false);
-	let syncMessage = $state<string | null>(null);
 
 	async function handleResync() {
 		isSyncing = true;
@@ -53,6 +91,7 @@
 			vault.updateFiles(files);
 			vault.updateNodes(nodes);
 			let msg = `Synced: ${result.indexed} indexed, ${result.skipped} unchanged, ${result.removed} removed`;
+			msg += collisionNote(result.id_collisions);
 			if (result.broken_links && result.broken_links > 0) {
 				msg += `. ${result.broken_links} broken link(s) cleaned up.`;
 			}
@@ -62,6 +101,17 @@
 		} finally {
 			isSyncing = false;
 		}
+	}
+
+
+	function collisionNote(collisions: SyncResult['id_collisions']): string {
+		if (!collisions || collisions.length === 0) return '';
+		const first = collisions[0];
+		const a = first.existing_file.split('/').pop() ?? first.existing_file;
+		const b = first.new_file.split('/').pop() ?? first.new_file;
+		const extra = collisions.length - 1;
+		const rest = extra > 0 ? ` and ${extra} other duplicate ID${extra === 1 ? '' : 's'}` : '';
+		return ` ${a} and ${b} share the ID ${first.id}${rest} — org-roam needs every ID to be unique.`;
 	}
 
 	async function handleRebuild() {
@@ -74,6 +124,7 @@
 			vault.updateFiles(files);
 			vault.updateNodes(nodes);
 			let msg = `Rebuilt: ${result.indexed} files indexed from scratch`;
+			msg += collisionNote(result.id_collisions);
 			if (result.broken_links && result.broken_links > 0) {
 				msg += `. ${result.broken_links} broken link(s) cleaned up.`;
 			}
@@ -222,20 +273,38 @@
 				</h2>
 				<div class="space-y-3">
 					<div>
-						<label class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">TODO Keywords</label>
-						<input type="text" bind:value={todoInput} onblur={saveOrgConfig} class="w-full rounded-lg border border-surface-200 bg-surface-50 px-3 py-2 text-sm dark:border-surface-700 dark:bg-surface-950" placeholder="TODO, NEXT, WAITING" />
-						<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Active states, comma separated</p>
+						<label for="todo-keywords" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">TODO Keywords</label>
+						<input id="todo-keywords" type="text" bind:value={todoInput} onblur={saveOrgConfig} aria-invalid={todoError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {todoError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="TODO, NEXT, WAITING" />
+						{#if todoError}
+							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{todoError}</p>
+						{:else}
+							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Active states, comma separated</p>
+						{/if}
 					</div>
 					<div>
-						<label class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Done Keywords</label>
-						<input type="text" bind:value={doneInput} onblur={saveOrgConfig} class="w-full rounded-lg border border-surface-200 bg-surface-50 px-3 py-2 text-sm dark:border-surface-700 dark:bg-surface-950" placeholder="DONE, CANCELLED" />
-						<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Completion states, comma separated</p>
+						<label for="done-keywords" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Done Keywords</label>
+						<input id="done-keywords" type="text" bind:value={doneInput} onblur={saveOrgConfig} aria-invalid={doneError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {doneError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="DONE, CANCELLED" />
+						{#if doneError}
+							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{doneError}</p>
+						{:else}
+							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Completion states, comma separated</p>
+						{/if}
 					</div>
 					<div>
-						<label class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Priorities</label>
-						<input type="text" bind:value={prioInput} onblur={saveOrgConfig} class="w-full rounded-lg border border-surface-200 bg-surface-50 px-3 py-2 text-sm dark:border-surface-700 dark:bg-surface-950" placeholder="A, B, C" />
-						<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Priority levels (highest first), comma separated</p>
+						<label for="priorities" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Priorities</label>
+						<input id="priorities" type="text" bind:value={prioInput} onblur={saveOrgConfig} aria-invalid={prioError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {prioError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="A, B, C" />
+						{#if prioError}
+							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{prioError}</p>
+						{:else}
+							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Priority levels (highest first), comma separated</p>
+						{/if}
 					</div>
+					{#if keywordSetError}
+						<p class="text-[11px] text-red-600 dark:text-red-400">{keywordSetError}</p>
+					{/if}
+					{#if orgConfigError}
+						<p class="text-[11px] text-surface-700 dark:text-surface-300">Settings are not saved while there is an error above.</p>
+					{/if}
 				</div>
 			</section>
 

@@ -50,9 +50,58 @@ pub fn get_filetags(entries: &[MetadataEntry]) -> Vec<String> {
         .collect()
 }
 
+/// Extract TODO keywords declared in the file via `#+TODO:`, `#+SEQ_TODO:` or `#+TYP_TODO:`.
+/// Fast-access keys and the `|` separator are stripped, e.g. `TODO(t) | DONE(d)` -> [TODO, DONE].
+pub fn get_todo_keywords(entries: &[MetadataEntry]) -> Vec<String> {
+    let mut keywords = Vec::new();
+
+    for entry in entries.iter().filter(|e| {
+        e.key.eq_ignore_ascii_case("TODO")
+            || e.key.eq_ignore_ascii_case("SEQ_TODO")
+            || e.key.eq_ignore_ascii_case("TYP_TODO")
+    }) {
+        for token in entry.value.split_whitespace() {
+            if token == "|" {
+                continue;
+            }
+            let name = match token.find('(') {
+                Some(idx) => &token[..idx],
+                None => token,
+            };
+            let name = name.trim_end_matches('|');
+            if name.is_empty() {
+                continue;
+            }
+            if !keywords.iter().any(|k: &String| k == name) {
+                keywords.push(name.to_string());
+            }
+        }
+    }
+
+    keywords
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_todo_keywords_from_metadata() {
+        let entries = vec![
+            parse_metadata_line("#+TODO: SPEC(s) IMPL(i) | SHIPPED(d)").unwrap(),
+            parse_metadata_line("#+SEQ_TODO: REPORT BUG | FIXED").unwrap(),
+        ];
+        assert_eq!(
+            get_todo_keywords(&entries),
+            vec!["SPEC", "IMPL", "SHIPPED", "REPORT", "BUG", "FIXED"]
+        );
+    }
+
+    #[test]
+    fn test_no_todo_keywords() {
+        let entries = vec![parse_metadata_line("#+TITLE: Nothing").unwrap()];
+        assert!(get_todo_keywords(&entries).is_empty());
+    }
 
     #[test]
     fn test_title() {

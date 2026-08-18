@@ -10,7 +10,7 @@ pub fn parse_timestamp(s: &str) -> Option<(Timestamp, usize)> {
     };
 
     let close_pos = s.find(close)?;
-    let raw: String = s[..=close_pos].to_string();
+    let mut raw: String = s[..=close_pos].to_string();
     let inner = &s[1..close_pos];
 
     let parts: Vec<&str> = inner.split_whitespace().collect();
@@ -26,19 +26,32 @@ pub fn parse_timestamp(s: &str) -> Option<(Timestamp, usize)> {
 
     let mut day_name = None;
     let mut time = None;
+    let mut time_end = None;
     let mut repeater = None;
     let mut warning = None;
 
     for &part in &parts[1..] {
         if part.len() == 3 && part.chars().all(|c| c.is_alphabetic()) {
             day_name = Some(part.to_string());
-        } else if part.contains(':') && part.len() <= 5 && part.chars().all(|c| c.is_ascii_digit() || c == ':') {
-            time = Some(part.to_string());
+        } else if let Some((start, end)) = parse_time_part(part) {
+            time = Some(start);
+            time_end = end;
         } else if part.starts_with('+') || part.starts_with(".+") {
             repeater = Some(part.to_string());
         } else if part.starts_with('-') && part.len() >= 2 {
             // Warning period: -3d, -1w, etc.
             warning = Some(part.to_string());
+        }
+    }
+
+    // Date range: <a>--<b>
+    let mut consumed = close_pos + 1;
+    let mut range_end = None;
+    if let Some(after) = s.get(consumed..).and_then(|r| r.strip_prefix("--")) {
+        if let Some((end_ts, end_len)) = parse_timestamp(after) {
+            consumed += 2 + end_len;
+            raw = s[..consumed].to_string();
+            range_end = Some(Box::new(end_ts));
         }
     }
 
@@ -51,25 +64,75 @@ pub fn parse_timestamp(s: &str) -> Option<(Timestamp, usize)> {
             repeater,
             warning,
             raw,
+            time_end,
+            range_end,
         },
-        close_pos + 1,
+        consumed,
     ))
 }
 
-/// Parse a planning line (SCHEDULED, DEADLINE, CLOSED)
-pub fn parse_planning_line(line: &str) -> Option<Planning> {
-    let trimmed = line.trim();
-    let has_scheduled = trimmed.contains("SCHEDULED:");
-    let has_deadline = trimmed.contains("DEADLINE:");
-    let has_closed = trimmed.contains("CLOSED:");
+/// Parse a clock part: `HH:MM` or a range `HH:MM-HH:MM`
+fn parse_time_part(part: &str) -> Option<(String, Option<String>)> {
+    let (start, end) = match part.split_once('-') {
+        Some((a, b)) => (a, Some(b)),
+        None => (part, None),
+    };
 
-    if !has_scheduled && !has_deadline && !has_closed {
+    if !is_clock(start) {
         return None;
     }
+    if let Some(end) = end {
+        if !is_clock(end) {
+            return None;
+        }
+    }
 
-    let scheduled = extract_planning_timestamp(trimmed, "SCHEDULED:");
-    let deadline = extract_planning_timestamp(trimmed, "DEADLINE:");
-    let closed = extract_planning_timestamp(trimmed, "CLOSED:");
+    Some((start.to_string(), end.map(|e| e.to_string())))
+}
+
+fn is_clock(s: &str) -> bool {
+    s.len() >= 3
+        && s.len() <= 5
+        && s.contains(':')
+        && s.chars().all(|c| c.is_ascii_digit() || c == ':')
+}
+
+/// Parse a planning line (SCHEDULED, DEADLINE, CLOSED).
+/// The line must consist solely of `KEYWORD: <timestamp>` pairs.
+pub fn parse_planning_line(line: &str) -> Option<Planning> {
+    let mut rest = line.trim();
+
+    let mut scheduled = None;
+    let mut deadline = None;
+    let mut closed = None;
+    let mut found = false;
+
+    while !rest.is_empty() {
+        let (after_keyword, slot) = if let Some(r) = rest.strip_prefix("SCHEDULED:") {
+            (r, 0)
+        } else if let Some(r) = rest.strip_prefix("DEADLINE:") {
+            (r, 1)
+        } else if let Some(r) = rest.strip_prefix("CLOSED:") {
+            (r, 2)
+        } else {
+            return None;
+        };
+
+        let after_keyword = after_keyword.trim_start();
+        let (ts, len) = parse_timestamp(after_keyword)?;
+
+        match slot {
+            0 => scheduled = Some(ts),
+            1 => deadline = Some(ts),
+            _ => closed = Some(ts),
+        }
+        found = true;
+        rest = after_keyword[len..].trim_start();
+    }
+
+    if !found {
+        return None;
+    }
 
     Some(Planning {
         scheduled,
@@ -77,12 +140,6 @@ pub fn parse_planning_line(line: &str) -> Option<Planning> {
         closed,
         raw: line.to_string(),
     })
-}
-
-fn extract_planning_timestamp(line: &str, keyword: &str) -> Option<Timestamp> {
-    let idx = line.find(keyword)?;
-    let after = &line[idx + keyword.len()..].trim_start();
-    parse_timestamp(after).map(|(ts, _)| ts)
 }
 
 #[cfg(test)]
@@ -171,5 +228,48 @@ mod tests {
     fn test_not_a_timestamp() {
         assert!(parse_timestamp("hello").is_none());
         assert!(parse_timestamp("<not-a-date>").is_none());
+    }
+
+    #[test]
+    fn test_time_range() {
+        let (ts, len) = parse_timestamp("<2024-01-15 Mon 10:00-11:30>").unwrap();
+        assert_eq!(ts.time.as_deref(), Some("10:00"));
+        assert_eq!(ts.time_end.as_deref(), Some("11:30"));
+        assert_eq!(len, 28);
+    }
+
+    #[test]
+    fn test_time_range_with_repeater() {
+        let (ts, _) = parse_timestamp("<2024-01-15 Mon 09:00-10:00 +1w>").unwrap();
+        assert_eq!(ts.time.as_deref(), Some("09:00"));
+        assert_eq!(ts.time_end.as_deref(), Some("10:00"));
+        assert_eq!(ts.repeater.as_deref(), Some("+1w"));
+    }
+
+    #[test]
+    fn test_date_range() {
+        let (ts, len) = parse_timestamp("<2024-01-15 Mon>--<2024-01-17 Wed>").unwrap();
+        assert_eq!(ts.date, "2024-01-15");
+        assert_eq!(ts.raw, "<2024-01-15 Mon>--<2024-01-17 Wed>");
+        assert_eq!(len, 34);
+        let end = ts.range_end.unwrap();
+        assert_eq!(end.date, "2024-01-17");
+        assert_eq!(end.day_name.as_deref(), Some("Wed"));
+    }
+
+    #[test]
+    fn test_planning_requires_keyword_at_start() {
+        assert!(parse_planning_line("We SCHEDULED: the review for later.").is_none());
+        assert!(parse_planning_line("Body text mentioning DEADLINE: soon").is_none());
+    }
+
+    #[test]
+    fn test_planning_closed_and_scheduled() {
+        let plan =
+            parse_planning_line("  CLOSED: [2024-01-15 Mon 10:00] SCHEDULED: <2024-01-16 Tue>")
+                .unwrap();
+        assert!(plan.closed.is_some());
+        assert!(plan.scheduled.is_some());
+        assert!(plan.deadline.is_none());
     }
 }

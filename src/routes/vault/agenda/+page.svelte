@@ -2,10 +2,18 @@
 	import { onMount } from 'svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
-	import { getAgenda, readFile, saveFile, listNodes, listFiles } from '$lib/tauri/commands';
+	import { getAgenda, readFileMeta, saveFile, listNodes, localDate, localTime } from '$lib/tauri/commands';
+	import { onDbUpdated } from '$lib/tauri/events';
 	import { vault } from '$lib/stores/vault.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import type { HeadlineRecord } from '$lib/types/node';
+	import {
+		agendaReason, applyRepeaterOnDone, compareTasks, getTodoKeyword, isDoneKeyword,
+		isHeadlineLine, overdueItems as findOverdue, repeatKeyword, setClosed,
+		setPlanningDate, setPriority as setHeadlinePriority, setTodoKeyword, removePlanning,
+		timestampDate,
+	} from '$lib/org';
+	import type { KeywordConfig, PlanningKind } from '$lib/org';
 
 	let items = $state<HeadlineRecord[]>([]);
 	let error = $state<string | null>(null);
@@ -13,31 +21,61 @@
 	let taskSearch = $state('');
 	let taskFilter = $state<string>('all');
 	let changingId = $state<string | null>(null);
+	// Recomputed on load, on refresh and when the day rolls over, so a device left
+	// open overnight does not keep calling yesterday "Today".
+	let today = $state(localDate());
 
-	onMount(async () => {
-		try { items = await getAgenda(); }
-		catch (e) { error = String(e); }
+	async function refresh() {
+		try {
+			items = await getAgenda();
+			today = localDate();
+			error = null;
+		} catch (e) { error = String(e); }
+	}
+
+	onMount(() => {
+		refresh();
+		// Keep in step with external edits and the file watcher.
+		const unlisten = onDbUpdated(() => { refresh(); });
+		const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+		document.addEventListener('visibilitychange', onVisible);
+		const dayTimer = setInterval(() => { today = localDate(); }, 60_000);
+		return () => {
+			document.removeEventListener('visibilitychange', onVisible);
+			clearInterval(dayTimer);
+			void Promise.resolve(unlisten).then((off) => { if (typeof off === 'function') off(); });
+		};
 	});
 
 	// ── Helpers ──────────────────────────────────────────────────
 
-	function fmtDate(d: Date): string {
-		return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+	function keywordConfig(): KeywordConfig {
+		return { todoKeywords: orgConfig.todoKeywords, doneKeywords: orgConfig.doneKeywords };
+	}
+
+	function priorityConfig() {
+		return { priorities: orgConfig.priorities };
+	}
+
+	function nowForOrg() {
+		return { date: localDate(), time: localTime() };
 	}
 
 	function extractDate(raw: string | null): string {
-		if (!raw) return '';
-		const m = raw.match(/(\d{4}-\d{2}-\d{2})/);
-		return m ? m[1] : '';
+		return timestampDate(raw) ?? '';
 	}
 
 	function extractTime(raw: string | null): string {
-		if (!raw) return '';
-		const m = raw.match(/(\d{1,2}:\d{2})/);
+		const m = raw?.match(/(\d{1,2}:\d{2})/);
 		return m ? m[1] : '';
 	}
 
-	const today = fmtDate(new Date());
+	function dateTimeValue(raw: string | null): string {
+		const date = extractDate(raw);
+		if (!date) return '';
+		const time = extractTime(raw);
+		return time ? `${date}T${time}` : date;
+	}
 
 	/** Navigate to the node for an agenda item */
 	function navigateToItem(item: HeadlineRecord) {
@@ -45,55 +83,70 @@
 			navigation.navigateToNode(item.node_id);
 			return;
 		}
-		// No node_id — find the first node in the same file
 		const fileNode = vault.nodes.find(n => n.file === item.file);
-		if (fileNode) {
-			navigation.navigateToNode(fileNode.id);
-		}
+		if (fileNode) navigation.navigateToNode(fileNode.id);
 	}
 
-	function isOverdue(n: HeadlineRecord): boolean {
+	function isPastDue(n: HeadlineRecord): boolean {
 		const dl = extractDate(n.deadline);
-		return !!dl && dl < today && !orgConfig.doneKeywords.includes(n.todo ?? '');
+		return !!dl && dl < today && !isDone(n);
 	}
 
 	function isDone(n: HeadlineRecord): boolean {
-		return orgConfig.doneKeywords.includes(n.todo ?? '');
+		return isDoneKeyword(n.todo ?? null, keywordConfig());
 	}
 
 	// ── Weekly agenda ───────────────────────────────────────────
 
-	function weekDays(): { date: string; label: string; isToday: boolean }[] {
+	function weekDays(from: string): { date: string; label: string; isToday: boolean }[] {
 		const out: { date: string; label: string; isToday: boolean }[] = [];
-		const now = new Date();
+		const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+		const base = new Date(`${from}T12:00:00`);
 		for (let i = 0; i < 7; i++) {
-			const d = new Date(now); d.setDate(d.getDate() + i);
-			const ds = fmtDate(d);
-			const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+			const d = new Date(base); d.setDate(d.getDate() + i);
+			const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 			const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : `${dayNames[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}`;
 			out.push({ date: ds, label, isToday: i === 0 });
 		}
 		return out;
 	}
 
-	function itemsForDate(date: string): { node: HeadlineRecord; reason: 'deadline' | 'scheduled'; time: string }[] {
-		const result: { node: HeadlineRecord; reason: 'deadline' | 'scheduled'; time: string }[] = [];
+	interface DayEntry { node: HeadlineRecord; reason: string; time: string; label: string | null }
+
+	function itemsForDate(date: string): DayEntry[] {
+		const done = orgConfig.doneKeywords;
+		const result: DayEntry[] = [];
 		for (const n of items) {
-			if (isDone(n)) continue;
-			if (extractDate(n.deadline) === date) result.push({ node: n, reason: 'deadline', time: extractTime(n.deadline) });
-			else if (extractDate(n.scheduled) === date) result.push({ node: n, reason: 'scheduled', time: extractTime(n.scheduled) });
+			const reason = agendaReason(n, date, today, done);
+			if (!reason) continue;
+			const source = reason.includes('deadline') ? n.deadline : n.scheduled;
+			result.push({
+				node: n,
+				reason,
+				time: extractTime(source),
+				label: reason === 'overdue-scheduled'
+					? `Sched. ${daysBetween(extractDate(n.scheduled), date)}x`
+					: reason === 'upcoming-deadline'
+						? `In ${daysBetween(date, extractDate(n.deadline))} d.`
+						: null,
+			});
 		}
-		// Sort by time (items with time first, then by time string, then by priority)
 		result.sort((a, b) => {
 			if (a.time && !b.time) return -1;
 			if (!a.time && b.time) return 1;
 			if (a.time && b.time) return a.time.localeCompare(b.time);
-			return (a.node.priority ?? 'Z').localeCompare(b.node.priority ?? 'Z');
+			return compareTasks(a.node, b.node, priorityConfig());
 		});
 		return result;
 	}
 
-	const overdueItems = $derived(items.filter(n => isOverdue(n)));
+	function daysBetween(from: string, to: string): number {
+		if (!from || !to) return 0;
+		const ms = new Date(`${to}T12:00:00`).getTime() - new Date(`${from}T12:00:00`).getTime();
+		return Math.max(0, Math.round(ms / 86_400_000));
+	}
+
+	const overdueItems = $derived(findOverdue(items, today, orgConfig.doneKeywords));
 
 	// ── Tasks tab ───────────────────────────────────────────────
 
@@ -102,128 +155,86 @@
 			if (taskFilter !== 'all' && n.todo !== taskFilter) return false;
 			if (taskSearch.trim()) return n.title?.toLowerCase().includes(taskSearch.toLowerCase()) ?? false;
 			return true;
-		}).sort((a, b) => {
-			const aDl = extractDate(a.deadline);
-			const bDl = extractDate(b.deadline);
-			const aSc = extractDate(a.scheduled);
-			const bSc = extractDate(b.scheduled);
-			const aDate = aDl || aSc || '';
-			const bDate = bDl || bSc || '';
-			// Items with deadline first, then scheduled, then no date
-			const aRank = aDl ? 0 : aSc ? 1 : 2;
-			const bRank = bDl ? 0 : bSc ? 1 : 2;
-			if (aRank !== bRank) return aRank - bRank;
-			// Within same category, sort by date
-			if (aDate && bDate && aDate !== bDate) return aDate.localeCompare(bDate);
-			// Same date: sort by priority (A < B < C < none)
-			return (a.priority ?? 'Z').localeCompare(b.priority ?? 'Z');
-		})
+		}).sort((a, b) => compareTasks(a, b, priorityConfig()))
 	);
 
-	// ── Inline state change ─────────────────────────────────────
+	// ── Inline editing ──────────────────────────────────────────
 
+	/**
+	 * Rewrite one headline in its file. The headline is located by line number and
+	 * verified to still be a headline, so a stale index can never rewrite prose.
+	 */
+	async function editHeadline(
+		node: HeadlineRecord,
+		fn: (lines: string[], idx: number) => string[]
+	) {
+		changingId = node.node_id ?? `${node.file}:${node.line}`;
+		try {
+			const file = await readFileMeta(node.file);
+			const lines = file.content.split('\n');
+			const idx = node.line;
+			if (idx < 0 || idx >= lines.length || !isHeadlineLine(lines[idx])) {
+				error = 'That task moved since the agenda was loaded. Refreshing.';
+				await refresh();
+				return;
+			}
+			const next = fn(lines, idx);
+			if (next.join('\n') !== file.content) {
+				await saveFile(node.file, next.join('\n'), file.hash);
+			}
+			await refresh();
+			try { vault.updateNodes(await listNodes()); } catch {}
+		} catch (e) {
+			const message = String(e);
+			error = message.includes('CONFLICT:')
+				? 'That file changed on disk. The agenda has been refreshed — try again.'
+				: message;
+			if (message.includes('CONFLICT:')) await refresh();
+		}
+		finally { changingId = null; }
+	}
+
+	/**
+	 * Move a task to a new state. Completing a repeating task shifts its planning
+	 * dates to the next occurrence and keeps it open, as org does; completing a
+	 * normal task stamps CLOSED.
+	 */
 	async function setState(node: HeadlineRecord, state: string | null) {
-		await modifyHeadline(node, (stars, kw, rest) => {
-			return state ? `${stars}${state} ${rest}` : `${stars}${rest}`;
+		await editHeadline(node, (lines, idx) => {
+			const config = keywordConfig();
+			const wasDone = isDoneKeyword(getTodoKeyword(lines[idx], config), config);
+			const becomesDone = isDoneKeyword(state, config);
+			let next = [...lines];
+
+			if (becomesDone && !wasDone) {
+				const repeat = applyRepeaterOnDone(next, idx, nowForOrg());
+				if (repeat.repeated) {
+					next = repeat.lines;
+					next[idx] = setTodoKeyword(next[idx], repeatKeyword(config), config);
+					return next;
+				}
+				next[idx] = setTodoKeyword(next[idx], state, config);
+				return setClosed(next, idx, nowForOrg());
+			}
+
+			next[idx] = setTodoKeyword(next[idx], state, config);
+			return wasDone && !becomesDone ? setClosed(next, idx, null) : next;
 		});
 	}
 
 	async function setPriority(node: HeadlineRecord, priority: string | null) {
-		await modifyHeadline(node, (stars, kw, rest) => {
-			const prefix = kw ? `${stars}${kw} ` : stars;
-			const stripped = rest.replace(/^\[#[A-Z]\]\s*/, '');
-			return priority ? `${prefix}[#${priority}] ${stripped}` : `${prefix}${stripped}`;
+		await editHeadline(node, (lines, idx) => {
+			const next = [...lines];
+			next[idx] = setHeadlinePriority(next[idx], priority, keywordConfig());
+			return next;
 		});
 	}
 
-	/** Set or update a DEADLINE/SCHEDULED date+time. Preserves any repeater syntax. */
-	async function setDate(node: HeadlineRecord, type: 'DEADLINE' | 'SCHEDULED', datetime: string | null) {
-		changingId = node.node_id ?? `${node.file}:${node.line}`;
-		try {
-			const content = await readFile(node.file);
-			const lines = content.split('\n');
-
-			// Find headline by line number
-			let hlIdx = node.line;
-			if (hlIdx >= lines.length || !/^\*+\s/.test(lines[hlIdx])) hlIdx = -1;
-			if (hlIdx === -1) return;
-
-			let planIdx = -1;
-			let insertAfter = hlIdx;
-			let existingRepeater = '';
-			for (let j = hlIdx + 1; j < lines.length && j < hlIdx + 6; j++) {
-				const t = lines[j].trim();
-				if (t.startsWith(`${type}:`) || t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:')) {
-					if (t.startsWith(`${type}:`)) {
-						planIdx = j;
-						// Extract existing repeater and warning to preserve them
-						const repMatch = t.match(/(\+\+?|\.?\+)\d+[hdwmy]/);
-						if (repMatch) existingRepeater = ' ' + repMatch[0];
-						const warnMatch = t.match(/-\d+[hdwmy]/);
-						if (warnMatch) existingRepeater += ' ' + warnMatch[0];
-					}
-					insertAfter = j;
-				} else if (t === ':PROPERTIES:') {
-					while (j < lines.length && lines[j].trim() !== ':END:') j++;
-					insertAfter = j;
-				} else break;
-			}
-
-			if (datetime) {
-				// datetime can be "2026-03-20" or "2026-03-20T14:00"
-				const [datePart, timePart] = datetime.includes('T') ? datetime.split('T') : [datetime, ''];
-				const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-				const d = new Date(datePart + 'T12:00:00');
-				let ts = `<${datePart} ${dayNames[d.getDay()]}`;
-				if (timePart) ts += ` ${timePart}`;
-				ts += `${existingRepeater}>`;
-				const newLine = `${type}: ${ts}`;
-
-				if (planIdx >= 0) {
-					lines[planIdx] = lines[planIdx].replace(new RegExp(`${type}:\\s*<[^>]*>`), `${type}: ${ts}`);
-				} else {
-					lines.splice(insertAfter + 1, 0, newLine);
-				}
-			} else if (planIdx >= 0) {
-				lines[planIdx] = lines[planIdx].replace(new RegExp(`\\s*${type}:\\s*<[^>]*>`), '').trim();
-				if (!lines[planIdx]) lines.splice(planIdx, 1);
-			}
-
-			await saveFile(node.file, lines.join('\n'));
-			items = await getAgenda();
-			try { vault.updateNodes(await listNodes()); } catch {}
-		} catch (e) { error = String(e); }
-		finally { changingId = null; }
-	}
-
-	async function modifyHeadline(node: HeadlineRecord, fn: (stars: string, kw: string | null, rest: string) => string) {
-		changingId = node.node_id ?? `${node.file}:${node.line}`;
-		try {
-			const content = await readFile(node.file);
-			const lines = content.split('\n');
-			const kwPattern = orgConfig.allKeywords.join('|');
-
-			// Find headline by line number (reliable for all headlines, with or without :ID:)
-			const targetLine = node.line;
-			for (let i = 0; i < lines.length; i++) {
-				const m = lines[i].match(/^(\*+\s+)/);
-				if (!m) continue;
-				if (i !== targetLine) continue;
-
-				const stars = m[1];
-				let rest = lines[i].slice(stars.length);
-				let kw: string | null = null;
-				const kwMatch = rest.match(new RegExp(`^(${kwPattern})\\s+`));
-				if (kwMatch) { kw = kwMatch[1]; rest = rest.slice(kwMatch[0].length); }
-				lines[i] = fn(stars, kw, rest);
-				break;
-			}
-
-			await saveFile(node.file, lines.join('\n'));
-			items = await getAgenda();
-			try { vault.updateNodes(await listNodes()); } catch {}
-		} catch (e) { error = String(e); }
-		finally { changingId = null; }
+	/** Set or clear a planning date, preserving that entry's own repeater cookies. */
+	async function setDate(node: HeadlineRecord, type: PlanningKind, datetime: string | null) {
+		await editHeadline(node, (lines, idx) =>
+			datetime ? setPlanningDate(lines, idx, type, datetime) : removePlanning(lines, idx, type)
+		);
 	}
 </script>
 
@@ -257,7 +268,7 @@
 					</div>
 				{/if}
 
-				{#each weekDays() as day}
+				{#each weekDays(today) as day}
 					{@const dayItems = itemsForDate(day.date)}
 					<div class="border-b border-surface-100 px-4 py-2 dark:border-surface-800">
 						<h3 class="mb-1 text-[11px] font-bold uppercase tracking-wide {day.isToday ? 'text-mycelium-700 dark:text-mycelium-400' : 'text-surface-700 dark:text-surface-300'}">
@@ -265,7 +276,14 @@
 						</h3>
 						{#if dayItems.length > 0}
 							{#each dayItems as di}
-								{@render taskRow(di.node)}
+								{#if di.label}
+									<div class="flex items-start gap-1.5">
+										<span class="mt-1.5 shrink-0 rounded px-1 text-[10px] font-medium {di.reason === 'overdue-scheduled' ? 'bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400' : 'bg-orange-50 text-orange-600 dark:bg-orange-950 dark:text-orange-400'}">{di.label}</span>
+										<div class="min-w-0 flex-1">{@render taskRow(di.node)}</div>
+									</div>
+								{:else}
+									{@render taskRow(di.node)}
+								{/if}
 							{/each}
 						{:else}
 							<p class="py-0.5 text-[11px] text-surface-700/40 dark:text-surface-300/40">—</p>
@@ -372,7 +390,7 @@
 				{#if dlDate || scDate}
 					<div style="display:flex;gap:6px;font-size:10px;margin-top:2px;flex-wrap:wrap">
 						{#if dlDate}
-							<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 4px;border-radius:3px;background:{isOverdue(item) ? '#fef2f2' : '#fff7ed'};color:{isOverdue(item) ? '#dc2626' : '#ea580c'}">
+							<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 4px;border-radius:3px;background:{isPastDue(item) ? '#fef2f2' : '#fff7ed'};color:{isPastDue(item) ? '#dc2626' : '#ea580c'}">
 								<span style="font-weight:700">DL</span> {dlDate}{#if dlTime} {dlTime}{/if}
 							</span>
 						{/if}

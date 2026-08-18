@@ -1,3 +1,4 @@
+use crate::fsutil;
 use crate::state::AppState;
 use db::query;
 use tauri::State;
@@ -77,11 +78,7 @@ pub async fn export_markdown(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let vault_path = state.vault_path()?;
-    let full_path = if std::path::PathBuf::from(&file_path).is_absolute() {
-        std::path::PathBuf::from(&file_path)
-    } else {
-        vault_path.join(&file_path)
-    };
+    let full_path = fsutil::resolve_in_vault(&vault_path, &file_path)?;
 
     let content = std::fs::read_to_string(&full_path)
         .map_err(|e| format!("Failed to read file: {e}"))?;
@@ -97,11 +94,7 @@ pub async fn export_html(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let vault_path = state.vault_path()?;
-    let full_path = if std::path::PathBuf::from(&file_path).is_absolute() {
-        std::path::PathBuf::from(&file_path)
-    } else {
-        vault_path.join(&file_path)
-    };
+    let full_path = fsutil::resolve_in_vault(&vault_path, &file_path)?;
 
     let content = std::fs::read_to_string(&full_path)
         .map_err(|e| format!("Failed to read file: {e}"))?;
@@ -139,19 +132,15 @@ pub async fn rename_node(
         .map_err(|e| format!("Failed to read file: {e}"))?;
 
     let new_content = if node.level == 0 {
-        // File-level node: update #+TITLE:
-        let re = regex_lite::Regex::new(r"(?m)^#\+TITLE:\s+.*$").unwrap();
-        re.replace(&content, &format!("#+TITLE: {new_title}")).to_string()
+        set_file_title(&content, &new_title)
     } else {
-        // Headline node: update the headline text
-        // Find the headline line with this node's ID in the property drawer below it
         update_headline_title(&content, &node_id, &new_title)
     };
 
-    std::fs::write(&node_file, &new_content)
-        .map_err(|e| format!("Failed to write file: {e}"))?;
+    fsutil::atomic_write(&node_file, &new_content)?;
 
     let file_str = node_file.to_string_lossy().to_string();
+    state.note_own_write(&file_str, &fsutil::content_hash(&new_content));
     state.with_db(|conn| {
         db::index::index_file(conn, &file_str, &new_content)
             .map_err(|e| format!("Failed to index: {e}"))
@@ -163,6 +152,11 @@ pub async fn rename_node(
     })?;
 
     let old_link_pattern = format!("[[id:{node_id}][");
+    let re_str = format!(r"\[\[id:{}\]\[[^\]]*\]\]", regex_lite::escape(&node_id));
+    let re = regex_lite::Regex::new(&re_str).unwrap();
+    // A literal replacement: `$1` in a title must never expand as a capture group.
+    let replacement = format!("[[id:{node_id}][{new_title}]]");
+    let mut failed: Vec<String> = Vec::new();
 
     for bl in &backlinks {
         let bl_path = if std::path::PathBuf::from(&bl.source_file).is_absolute() {
@@ -173,86 +167,183 @@ pub async fn rename_node(
 
         if !bl_path.exists() { continue; }
 
-        let bl_content = std::fs::read_to_string(&bl_path)
-            .map_err(|e| format!("Failed to read {}: {e}", bl.source_file))?;
+        // One unreadable or unwritable file must not abort the rename and leave the
+        // vault half-updated; collect the failures and report them all at the end.
+        let bl_content = match std::fs::read_to_string(&bl_path) {
+            Ok(c) => c,
+            Err(e) => { failed.push(format!("{}: {e}", bl.source_file)); continue; }
+        };
 
-        if bl_content.contains(&old_link_pattern) {
-            // Replace [[id:node_id][old description]] with [[id:node_id][new_title]]
-            let re_str = format!(r"\[\[id:{}\]\[[^\]]*\]\]", regex_lite::escape(&node_id));
-            let re = regex_lite::Regex::new(&re_str).unwrap();
-            let replacement = format!("[[id:{node_id}][{new_title}]]");
-            let new_bl_content = re.replace_all(&bl_content, replacement.as_str()).to_string();
+        if !bl_content.contains(&old_link_pattern) { continue; }
 
-            if new_bl_content != bl_content {
-                std::fs::write(&bl_path, &new_bl_content)
-                    .map_err(|e| format!("Failed to write {}: {e}", bl.source_file))?;
+        let new_bl_content = re
+            .replace_all(&bl_content, |_: &regex_lite::Captures| replacement.clone())
+            .to_string();
+        if new_bl_content == bl_content { continue; }
 
-                let bl_str = bl_path.to_string_lossy().to_string();
-                state.with_db(|conn| {
-                    db::index::index_file(conn, &bl_str, &new_bl_content)
-                        .map_err(|e| format!("Failed to index {}: {e}", bl.source_file))
-                })?;
-            }
+        if let Err(e) = fsutil::atomic_write(&bl_path, &new_bl_content) {
+            failed.push(format!("{}: {e}", bl.source_file));
+            continue;
+        }
+
+        let bl_str = bl_path.to_string_lossy().to_string();
+        state.note_own_write(&bl_str, &fsutil::content_hash(&new_bl_content));
+        if let Err(e) = state.with_db(|conn| {
+            db::index::index_file(conn, &bl_str, &new_bl_content)
+                .map_err(|e| format!("Failed to index {}: {e}", bl.source_file))
+        }) {
+            failed.push(e);
         }
     }
 
     let _ = app.emit("db-updated", ());
-    Ok(())
+
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Renamed the node, but {} file(s) still show the old title: {}",
+            failed.len(),
+            failed.join("; ")
+        ))
+    }
 }
 
-/// Update a headline's title text in an org file, identified by the :ID: in its property drawer
-fn update_headline_title(content: &str, node_id: &str, new_title: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut result = Vec::new();
-    let id_line = format!(":ID: {node_id}");
-    let mut i = 0;
-
-    while i < lines.len() {
-        // Look for :ID: node_id
-        if lines[i].trim().contains(&id_line) {
-            // Walk backwards to find the headline before this property drawer
-            let mut j = i;
-            // First find :PROPERTIES:
-            while j > 0 && !lines[j].trim().starts_with(":PROPERTIES:") { j -= 1; }
-            // Then find the headline before :PROPERTIES:
-            if j > 0 {
-                let hl_idx = j - 1;
-                let hl = lines[hl_idx];
-                if let Some(caps) = hl.trim().strip_prefix('*') {
-                    // Count stars
-                    let stars = 1 + caps.chars().take_while(|c| *c == '*').count();
-                    let star_str: String = "*".repeat(stars);
-                    // Preserve TODO keyword and tags if present
-                    let after_stars = &hl.trim()[stars..].trim_start();
-                    let mut prefix = String::new();
-                    // Check for TODO keyword (uses configured keyword set)
-                    for kw in org_parser::headline::todo_keywords() {
-                        if after_stars.starts_with(&kw) && after_stars[kw.len()..].starts_with(' ') {
-                            prefix = format!("{kw} ");
-                            break;
-                        }
-                    }
-                    // Check for tags at end
-                    let mut tags = String::new();
-                    if let Some(tag_start) = after_stars.rfind(" :") {
-                        let tag_part = &after_stars[tag_start..];
-                        if tag_part.trim().ends_with(':') {
-                            tags = tag_part.to_string();
-                        }
-                    }
-                    // Replace the headline
-                    result.truncate(hl_idx);
-                    result.push(format!("{star_str} {prefix}{new_title}{tags}"));
-                    // Re-add lines from :PROPERTIES: onward
-                    for k in j..=i { result.push(lines[k].to_string()); }
-                    i += 1;
-                    continue;
-                }
-            }
-        }
-        result.push(lines[i].to_string());
-        i += 1;
+/// Set the file-level `#+TITLE:`, matching org's case-insensitive keyword and
+/// inserting the line when the file has none.
+fn set_file_title(content: &str, new_title: &str) -> String {
+    let re = regex_lite::Regex::new(r"(?im)^([ \t]*#\+TITLE:)[ \t]*.*$").unwrap();
+    if let Some(caps) = re.captures(content) {
+        let keyword = caps[1].to_string();
+        return re
+            .replace(content, |_: &regex_lite::Captures| format!("{keyword} {new_title}"))
+            .to_string();
     }
 
-    result.join("\n")
+    // No title line yet: place one after a leading file-level property drawer.
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    let mut insert_at = 0;
+    if lines.first().map(|l| l.trim() == ":PROPERTIES:").unwrap_or(false) {
+        while insert_at < lines.len() && lines[insert_at].trim() != ":END:" { insert_at += 1; }
+        insert_at = (insert_at + 1).min(lines.len());
+    }
+    lines.insert(insert_at, format!("#+TITLE: {new_title}"));
+    let mut out = lines.join("\n");
+    if content.ends_with('\n') { out.push('\n'); }
+    out
+}
+
+/// Update a headline's title text, identified by the `:ID:` in its property drawer.
+fn update_headline_title(content: &str, node_id: &str, new_title: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let id_line = format!(":ID: {node_id}");
+    let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+    for i in 0..lines.len() {
+        if !lines[i].trim().contains(&id_line) { continue; }
+
+        // Walk back to :PROPERTIES:, then past any planning line, to the headline.
+        let mut j = i;
+        while j > 0 && !lines[j].trim().starts_with(":PROPERTIES:") { j -= 1; }
+        if j == 0 { break; }
+        let mut hl_idx = j - 1;
+        while hl_idx > 0 && is_planning_line(lines[hl_idx]) { hl_idx -= 1; }
+
+        let hl = lines[hl_idx];
+        let trimmed = hl.trim_start();
+        if !trimmed.starts_with('*') { break; }
+        let stars = trimmed.chars().take_while(|c| *c == '*').count();
+        let after_stars = trimmed[stars..].trim_start();
+
+        let mut prefix = String::new();
+        for kw in org_parser::headline::todo_keywords() {
+            if after_stars.strip_prefix(&kw).map(|r| r.is_empty() || r.starts_with(' ')).unwrap_or(false) {
+                prefix = format!("{kw} ");
+                break;
+            }
+        }
+
+        let mut tags = String::new();
+        if let Some(tag_start) = after_stars.rfind(" :") {
+            let tag_part = &after_stars[tag_start..];
+            if tag_part.trim().ends_with(':') && !tag_part.trim().contains(' ') {
+                tags = tag_part.to_string();
+            }
+        }
+
+        out[hl_idx] = format!("{} {prefix}{new_title}{tags}", "*".repeat(stars));
+        break;
+    }
+
+    let mut joined = out.join("\n");
+    // `lines()` drops the final newline; putting it back avoids a whole-file diff.
+    if content.ends_with('\n') { joined.push('\n'); }
+    joined
+}
+
+fn is_planning_line(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("SCHEDULED:") || t.starts_with("DEADLINE:") || t.starts_with("CLOSED:")
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sets_title_case_insensitively_and_keeps_keyword_case() {
+        let content = "#+title: Old\n\nBody\n";
+        assert_eq!(set_file_title(content, "New"), "#+title: New\n\nBody\n");
+    }
+
+    #[test]
+    fn sets_uppercase_title() {
+        assert_eq!(set_file_title("#+TITLE: Old\n", "New"), "#+TITLE: New\n");
+    }
+
+    #[test]
+    fn title_containing_dollar_is_written_literally() {
+        assert_eq!(set_file_title("#+TITLE: Old\n", "Cost $1 million"), "#+TITLE: Cost $1 million\n");
+    }
+
+    #[test]
+    fn inserts_title_when_the_file_has_none() {
+        let content = ":PROPERTIES:\n:ID: abc\n:END:\nBody\n";
+        assert_eq!(
+            set_file_title(content, "New"),
+            ":PROPERTIES:\n:ID: abc\n:END:\n#+TITLE: New\nBody\n"
+        );
+    }
+
+    #[test]
+    fn renames_a_headline_that_has_a_planning_line() {
+        let content = "* TODO Old headline\nSCHEDULED: <2026-08-17 Mon>\n:PROPERTIES:\n:ID: abc\n:END:\nBody\n";
+        let out = update_headline_title(content, "abc", "New headline");
+        assert!(out.starts_with("* TODO New headline\n"), "got: {out}");
+        assert!(out.contains("SCHEDULED: <2026-08-17 Mon>"));
+    }
+
+    #[test]
+    fn renames_a_headline_without_planning() {
+        let content = "** Old :work:\n:PROPERTIES:\n:ID: abc\n:END:\n";
+        let out = update_headline_title(content, "abc", "New");
+        assert!(out.starts_with("** New :work:\n"), "got: {out}");
+    }
+
+    #[test]
+    fn headline_rename_preserves_trailing_newline_state() {
+        let with_nl = "* Old\n:PROPERTIES:\n:ID: abc\n:END:\n";
+        assert!(update_headline_title(with_nl, "abc", "New").ends_with('\n'));
+        let without_nl = "* Old\n:PROPERTIES:\n:ID: abc\n:END:";
+        assert!(!update_headline_title(without_nl, "abc", "New").ends_with('\n'));
+    }
+
+    #[test]
+    fn headline_rename_leaves_other_nodes_alone() {
+        let content = "* One\n:PROPERTIES:\n:ID: a\n:END:\n* Two\n:PROPERTIES:\n:ID: b\n:END:\n";
+        let out = update_headline_title(content, "b", "Renamed");
+        assert!(out.contains("* One\n"));
+        assert!(out.contains("* Renamed\n"));
+    }
 }

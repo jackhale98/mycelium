@@ -1,18 +1,21 @@
 <script lang="ts">
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { searchFull } from '$lib/tauri/commands';
+	import { highlightSnippet } from '$lib/search/snippet';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import type { SearchResult } from '$lib/types/node';
 
 	let query = $state('');
 	let results = $state<SearchResult[]>([]);
 	let isSearching = $state(false);
+	let error = $state<string | null>(null);
 	let searchTimeout: ReturnType<typeof setTimeout>;
 
 	function handleInput() {
 		clearTimeout(searchTimeout);
 		if (!query.trim()) {
 			results = [];
+			error = null;
 			return;
 		}
 		searchTimeout = setTimeout(() => doSearch(), 200);
@@ -21,10 +24,12 @@
 	async function doSearch() {
 		if (!query.trim()) return;
 		isSearching = true;
+		error = null;
 		try {
 			results = await searchFull(query.trim());
-		} catch {
+		} catch (e) {
 			results = [];
+			error = String(e);
 		} finally {
 			isSearching = false;
 		}
@@ -35,12 +40,6 @@
 			clearTimeout(searchTimeout);
 			doSearch();
 		}
-	}
-
-	/** Highlight <<matched>> text in snippet */
-	function formatSnippet(snippet: string): string {
-		return snippet
-			.replace(/<<([^>]+)>>/g, '<mark class="bg-mycelium-200 dark:bg-mycelium-800 rounded px-0.5">$1</mark>');
 	}
 </script>
 
@@ -71,6 +70,17 @@
 	<div class="flex-1 overflow-y-auto p-4">
 		{#if isSearching}
 			<p class="text-sm text-surface-700 dark:text-surface-300">Searching...</p>
+		{:else if error}
+			<div class="rounded-lg bg-red-50 p-3 dark:bg-red-950">
+				<p class="text-sm font-medium text-red-600 dark:text-red-400">Search failed</p>
+				<p class="mt-1 text-xs text-red-600/80 dark:text-red-400/80">{error}</p>
+				<button
+					onclick={doSearch}
+					class="mt-2 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900"
+				>
+					Try again
+				</button>
+			</div>
 		{:else if results.length > 0}
 			<ul class="space-y-1">
 				{#each results as result}
@@ -91,7 +101,7 @@
 							</div>
 							{#if result.snippet}
 								<div class="mt-1 text-xs leading-relaxed text-surface-700 dark:text-surface-300">
-									{@html formatSnippet(result.snippet)}
+									{@html highlightSnippet(result.snippet)}
 								</div>
 							{/if}
 							<div class="mt-1 truncate text-[10px] text-surface-700/60 dark:text-surface-300/60">

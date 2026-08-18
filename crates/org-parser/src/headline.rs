@@ -33,34 +33,37 @@ pub fn todo_keywords() -> Vec<String> {
     }
 }
 
+/// Whether a line is a valid headline: column-0 stars followed by a space.
+pub fn is_headline(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let level = bytes.iter().take_while(|&&b| b == b'*').count();
+    level > 0 && bytes.len() > level && bytes[level] == b' '
+}
+
 /// Parse a headline from a line like "** TODO [#A] Title :tag1:tag2:"
 pub fn parse_headline(line: &str) -> Option<Headline> {
-    if !line.starts_with('*') {
+    parse_headline_with_keywords(line, &todo_keywords())
+}
+
+/// Parse a headline using an explicit TODO keyword set instead of the process-global one.
+pub fn parse_headline_with_keywords(line: &str, keywords: &[String]) -> Option<Headline> {
+    if !is_headline(line) {
         return None;
     }
 
     let raw = line.to_string();
-    let bytes = line.as_bytes();
+    let level = line.bytes().take_while(|&b| b == b'*').count();
+    let rest = line[level..].trim_start();
 
-    // Count stars
-    let level = bytes.iter().take_while(|&&b| b == b'*').count();
-    if level == 0 || (bytes.len() > level && bytes[level] != b' ') {
-        return None;
-    }
-
-    let rest = if level < line.len() {
-        line[level..].trim_start()
-    } else {
-        ""
-    };
-
-    // Parse TODO keyword using configured keyword set
-    let kws = todo_keywords();
-    let kw_refs: Vec<&str> = kws.iter().map(|s| s.as_str()).collect();
+    // Parse TODO keyword using the supplied keyword set
+    let kw_refs: Vec<&str> = keywords.iter().map(|s| s.as_str()).collect();
     let (keyword, rest) = parse_keyword(rest, &kw_refs);
 
     // Parse priority [#A]
     let (priority, rest) = parse_priority(rest);
+
+    // Parse COMMENT marker
+    let (is_comment, rest) = parse_comment(rest);
 
     // Parse tags at end
     let (tags, title_str) = parse_tags(rest);
@@ -77,7 +80,19 @@ pub fn parse_headline(line: &str) -> Option<Headline> {
         raw,
         planning: None,
         properties: None,
+        pos: 0,
+        is_comment,
     })
+}
+
+/// Detect the COMMENT marker. The marker stays in the title text; `is_comment` reports it.
+fn parse_comment(s: &str) -> (bool, &str) {
+    if let Some(after) = s.strip_prefix("COMMENT") {
+        if after.is_empty() || after.starts_with(' ') {
+            return (true, s);
+        }
+    }
+    (false, s)
 }
 
 /// Parse a TODO-style keyword at the start of the string
@@ -93,44 +108,57 @@ fn parse_keyword<'a>(s: &'a str, keywords: &[&str]) -> (Option<String>, &'a str)
     (None, s)
 }
 
-/// Parse a priority like [#A]
+/// Parse a priority like [#A] or [#1]
 fn parse_priority(s: &str) -> (Option<char>, &str) {
     if s.len() >= 4 && s.starts_with("[#") && s.as_bytes()[3] == b']' {
         let c = s.as_bytes()[2] as char;
-        if c.is_ascii_uppercase() {
+        if c.is_ascii_alphanumeric() {
             return (Some(c), s[4..].trim_start());
         }
     }
     (None, s)
 }
 
+fn is_tag_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '@' || c == '#' || c == '%'
+}
+
 /// Parse tags at the end of a headline like " :tag1:tag2:"
 fn parse_tags(s: &str) -> (Vec<String>, &str) {
     let trimmed = s.trim_end();
     if !trimmed.ends_with(':') {
-        return (Vec::new(), s.trim_end());
+        return (Vec::new(), trimmed);
     }
 
-    // Find the start of tags: look for a space followed by ":"
-    if let Some(tag_start) = trimmed.rfind(" :") {
-        let tag_part = &trimmed[tag_start + 1..];
-        // Validate: must be :word: pattern
-        let tags: Vec<String> = tag_part
-            .split(':')
-            .filter(|t| !t.is_empty())
-            .map(|t| t.to_string())
-            .collect();
-
-        if !tags.is_empty()
-            && tags
-                .iter()
-                .all(|t| t.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '@'))
-        {
-            return (tags, trimmed[..tag_start].trim_end());
+    // Walk backwards over the trailing run of tag characters and colons
+    let mut tag_start = trimmed.len();
+    for (idx, c) in trimmed.char_indices().rev() {
+        if c == ':' || is_tag_char(c) {
+            tag_start = idx;
+        } else {
+            break;
         }
     }
 
-    (Vec::new(), trimmed)
+    // The run must begin with ':' and sit at the start of the line or after whitespace
+    if !trimmed[tag_start..].starts_with(':') {
+        return (Vec::new(), trimmed);
+    }
+    if tag_start > 0 && !trimmed[..tag_start].ends_with(char::is_whitespace) {
+        return (Vec::new(), trimmed);
+    }
+
+    let tags: Vec<String> = trimmed[tag_start..]
+        .split(':')
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+        .collect();
+
+    if tags.is_empty() {
+        return (Vec::new(), trimmed);
+    }
+
+    (tags, trimmed[..tag_start].trim_end())
 }
 
 /// Attach planning and properties to a headline by consuming lines after it
@@ -208,5 +236,70 @@ mod tests {
     fn test_not_a_headline() {
         assert!(parse_headline("Not a headline").is_none());
         assert!(parse_headline("*bold text*").is_none());
+    }
+
+    #[test]
+    fn test_bare_stars_are_not_headlines() {
+        assert!(parse_headline("*").is_none());
+        assert!(parse_headline("**").is_none());
+        assert!(parse_headline("***").is_none());
+        assert!(!is_headline("**"));
+        assert!(is_headline("** "));
+    }
+
+    #[test]
+    fn test_tag_only_headline() {
+        let h = parse_headline("* :tagonly:").unwrap();
+        assert_eq!(h.tags, vec!["tagonly"]);
+        assert!(crate::title_to_text(&h.title).is_empty());
+    }
+
+    #[test]
+    fn test_tags_with_special_chars() {
+        let h = parse_headline("* Title :c#:99%:@home:with_under:").unwrap();
+        assert_eq!(h.tags, vec!["c#", "99%", "@home", "with_under"]);
+        assert_eq!(crate::title_to_text(&h.title), "Title");
+    }
+
+    #[test]
+    fn test_colon_in_title_is_not_a_tag() {
+        let h = parse_headline("* Note: something:").unwrap();
+        assert!(h.tags.is_empty());
+        assert_eq!(crate::title_to_text(&h.title), "Note: something:");
+    }
+
+    #[test]
+    fn test_numeric_priority() {
+        let h = parse_headline("* TODO [#1] Numeric priority").unwrap();
+        assert_eq!(h.priority, Some('1'));
+        assert_eq!(crate::title_to_text(&h.title), "Numeric priority");
+    }
+
+    #[test]
+    fn test_comment_headline() {
+        let h = parse_headline("* COMMENT Draft notes").unwrap();
+        assert!(h.is_comment);
+        let h = parse_headline("* TODO COMMENT Draft").unwrap();
+        assert!(h.is_comment);
+        let h = parse_headline("* COMMENTARY on things").unwrap();
+        assert!(!h.is_comment);
+    }
+
+    #[test]
+    fn test_archive_tag() {
+        let h = parse_headline("* Old stuff :ARCHIVE:").unwrap();
+        assert!(h.is_archived());
+        let h = parse_headline("* Fresh stuff :work:").unwrap();
+        assert!(!h.is_archived());
+    }
+
+    #[test]
+    fn test_explicit_keywords() {
+        let kws = vec!["SPEC".to_string(), "SHIPPED".to_string()];
+        let h = parse_headline_with_keywords("* SPEC Write it down", &kws).unwrap();
+        assert_eq!(h.keyword, Some("SPEC".to_string()));
+        let h = parse_headline_with_keywords("* TODO Write it down", &kws).unwrap();
+        assert_eq!(h.keyword, None);
+        assert_eq!(crate::title_to_text(&h.title), "TODO Write it down");
     }
 }

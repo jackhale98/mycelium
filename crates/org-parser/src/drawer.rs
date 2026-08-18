@@ -1,4 +1,5 @@
 use crate::cst::Drawer;
+use crate::headline::is_headline;
 
 /// Parse a drawer (e.g. :LOGBOOK: ... :END:) from lines.
 /// Note: Property drawers are handled separately in property.rs.
@@ -35,6 +36,12 @@ pub fn parse_drawer(lines: &[&str], start: usize) -> Option<(Drawer, usize)> {
 
     while i < lines.len() {
         let current = lines[i];
+
+        // Headlines take precedence: an unterminated drawer never swallows them
+        if is_headline(current) {
+            return None;
+        }
+
         raw.push_str(current);
 
         if current.trim() == ":END:" {
@@ -79,5 +86,23 @@ mod tests {
     fn test_not_a_drawer() {
         assert!(parse_drawer(&[":PROPERTIES:"], 0).is_none());
         assert!(parse_drawer(&["Not a drawer"], 0).is_none());
+    }
+
+    #[test]
+    fn test_unterminated_drawer_stops_at_headline() {
+        let lines = vec![
+            ":LOGBOOK:",
+            "- some entry",
+            "* Next Headline",
+            "body",
+            ":END:",
+        ];
+        assert!(parse_drawer(&lines, 0).is_none());
+    }
+
+    #[test]
+    fn test_unterminated_drawer_at_end_of_file() {
+        let lines = vec![":LOGBOOK:", "- some entry"];
+        assert!(parse_drawer(&lines, 0).is_none());
     }
 }

@@ -1,48 +1,61 @@
+use crate::commands::editor::{
+    slugify, unique_org_path, validate_local_date, validate_timestamp, write_and_index,
+};
 use crate::state::AppState;
-use crate::commands::editor::timestamp_now;
-use db::{index, query};
+use db::query;
 use tauri::{AppHandle, Emitter, State};
 
-/// Get or create today's daily note.
-/// Uses org-roam naming: daily/YYYYMMDDHHmmss-YYYY_MM_DD.org
+/// Get or create the daily note for a date.
+/// `date` is the user's LOCAL date (`YYYY-MM-DD`) and is used for both the lookup
+/// and the created note. `timestamp` is the optional local `YYYYMMDDHHmmss` used
+/// for the org-roam filename prefix; when omitted it defaults to midnight on `date`.
 #[tauri::command]
 pub async fn get_or_create_daily(
     app: AppHandle,
     date: String,
+    timestamp: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<query::NodeRecord, String> {
-    // Try to find existing daily note
-    let existing = state.with_db(|conn| {
-        query::find_daily_note(conn, &date).map_err(|e| e.to_string())
-    })?;
+    ensure_daily(&app, &state, &date, timestamp.as_deref())
+}
+
+/// Resolve the daily note for `date`, creating it if it does not exist yet.
+/// Shared by `get_or_create_daily` and quick capture so both always agree on
+/// which file a given day's note is.
+pub fn ensure_daily(
+    app: &AppHandle,
+    state: &AppState,
+    date: &str,
+    timestamp: Option<&str>,
+) -> Result<query::NodeRecord, String> {
+    validate_local_date(date)?;
+
+    let existing =
+        state.with_db(|conn| query::find_daily_note(conn, date).map_err(|e| e.to_string()))?;
 
     if let Some(node) = existing {
         return Ok(node);
     }
 
-    // Create new daily note file
+    let timestamp = match timestamp {
+        Some(ts) => {
+            validate_timestamp(ts)?;
+            ts.to_string()
+        }
+        None => format!("{}000000", date.replace('-', "")),
+    };
+
     let vault_path = state.vault_path()?;
     let daily_dir = vault_path.join("daily");
     std::fs::create_dir_all(&daily_dir)
         .map_err(|e| format!("Failed to create daily directory: {e}"))?;
 
     let id = uuid::Uuid::new_v4().to_string();
-    let ts = timestamp_now();
-    let slug = date.replace('-', "_");
-    let file_path = daily_dir.join(format!("{ts}-{slug}.org"));
+    let file_path = unique_org_path(&daily_dir, &timestamp, &slugify(date));
 
-    let content = format!(
-        ":PROPERTIES:\n:ID: {id}\n:END:\n#+TITLE: {date}\n\n"
-    );
+    let content = format!(":PROPERTIES:\n:ID: {id}\n:END:\n#+TITLE: {date}\n\n");
 
-    std::fs::write(&file_path, &content)
-        .map_err(|e| format!("Failed to create daily note: {e}"))?;
-
-    let file_path_str = file_path.to_string_lossy().to_string();
-    state.with_db(|conn| {
-        index::index_file(conn, &file_path_str, &content)
-            .map_err(|e| format!("Failed to index daily note: {e}"))
-    })?;
+    write_and_index(state, &file_path, &content)?;
 
     let _ = app.emit("db-updated", ());
 

@@ -2,23 +2,41 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 /// Convert a user query into an FTS5 query with prefix matching.
-/// Each word gets a `*` appended so "org" matches "organic", "organization", etc.
-/// Special FTS5 characters are stripped to prevent syntax errors.
+/// Each word becomes a quoted string with `*` appended so "org" matches
+/// "organic" and "org-roam" is treated as text rather than as a NOT operator.
+/// Returns an empty string when nothing searchable remains.
 fn make_fts_query(query: &str) -> String {
     query
         .split_whitespace()
-        .map(|word| {
-            // Strip FTS5 special characters
-            let clean: String = word.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
+        .filter_map(|word| {
+            let clean: String = word
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '_' { c } else { ' ' })
+                .collect();
+            let clean = clean.trim();
             if clean.is_empty() {
-                String::new()
+                None
             } else {
-                format!("{}*", clean)
+                Some(format!("\"{}\"*", clean))
             }
         })
-        .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Quote arbitrary text as a single FTS5 phrase.
+/// Returns an empty string when nothing searchable remains.
+fn make_fts_phrase(text: &str) -> String {
+    let clean: String = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { ' ' })
+        .collect();
+    let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.is_empty() {
+        String::new()
+    } else {
+        format!("\"{clean}\"")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +105,18 @@ pub struct HeadlineRecord {
 pub struct GraphData {
     pub nodes: Vec<GraphNode>,
     pub links: Vec<GraphLink>,
+}
+
+/// Graph data capped to a node budget, with the full-graph totals alongside.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoundedGraphData {
+    pub nodes: Vec<GraphNode>,
+    pub links: Vec<GraphLink>,
+    pub total_nodes: usize,
+    pub total_links: usize,
+    pub returned_nodes: usize,
+    pub returned_links: usize,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,6 +263,9 @@ fn extract_link_context(file_path: &str, target_id: &str) -> Option<String> {
 pub fn search_nodes(conn: &Connection, query: &str) -> rusqlite::Result<Vec<NodeRecord>> {
     // Add * to each word for prefix matching (e.g. "org" matches "organic", "organization")
     let fts_query = make_fts_query(query);
+    if fts_query.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let fts_result = conn.prepare(
         "SELECT n.id, n.file, n.level, n.pos, n.todo, n.priority, n.scheduled, n.deadline, n.title, n.properties, n.olp
@@ -292,6 +325,9 @@ pub fn search_nodes(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Node
 pub fn search_full(conn: &Connection, query: &str) -> rusqlite::Result<Vec<SearchResult>> {
     let mut results = Vec::new();
     let fts_query = make_fts_query(query);
+    if fts_query.is_empty() {
+        return Ok(results);
+    }
 
     // Search titles via nodes_fts
     if let Ok(mut stmt) = conn.prepare(
@@ -366,7 +402,7 @@ pub fn search_full(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Searc
 /// List all files in the database
 pub fn list_files(conn: &Connection) -> rusqlite::Result<Vec<FileRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT file, title, hash, mtime FROM files ORDER BY file",
+        "SELECT file, title, hash, mtime FROM files WHERE excluded = 0 ORDER BY file",
     )?;
 
     let rows = stmt.query_map([], |row| {
@@ -442,7 +478,11 @@ pub fn get_graph_data(conn: &Connection) -> rusqlite::Result<GraphData> {
         .filter_map(|r| r.ok())
         .collect();
 
-    // Get all id-type links
+    let node_ids: std::collections::HashSet<String> =
+        raw_nodes.iter().map(|(id, _)| id.clone()).collect();
+
+    // Get all id-type links, dropping any whose endpoints are not both present —
+    // a dangling link makes the force layout throw and no graph renders at all
     let mut link_stmt = conn.prepare("SELECT source, dest FROM links WHERE type = 'id'")?;
     let graph_links: Vec<GraphLink> = link_stmt
         .query_map([], |row| {
@@ -452,6 +492,7 @@ pub fn get_graph_data(conn: &Connection) -> rusqlite::Result<GraphData> {
             })
         })?
         .filter_map(|r| r.ok())
+        .filter(|l| node_ids.contains(&l.source) && node_ids.contains(&l.target))
         .collect();
 
     // Build link count map
@@ -487,15 +528,102 @@ pub fn get_graph_data(conn: &Connection) -> rusqlite::Result<GraphData> {
     })
 }
 
+/// Get graph data capped at `limit` nodes, keeping the most connected ones.
+/// Links are filtered to the returned nodes, so the set is always self-consistent.
+/// `total_nodes` / `total_links` describe the full graph so the UI can report
+/// what was left out.
+pub fn get_graph_data_limited(conn: &Connection, limit: usize) -> rusqlite::Result<BoundedGraphData> {
+    let total_nodes: usize =
+        conn.query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get::<_, i64>(0))? as usize;
+    let total_links: usize = conn.query_row(
+        "SELECT COUNT(*) FROM links WHERE type = 'id'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? as usize;
+
+    let mut node_stmt = conn.prepare(
+        "SELECT n.id, n.title, COALESCE(d.degree, 0) AS degree
+         FROM nodes n
+         LEFT JOIN (
+             SELECT id, SUM(c) AS degree FROM (
+                 SELECT source AS id, COUNT(*) AS c FROM links WHERE type = 'id' GROUP BY source
+                 UNION ALL
+                 SELECT dest AS id, COUNT(*) AS c FROM links WHERE type = 'id' GROUP BY dest
+             ) GROUP BY id
+         ) d ON d.id = n.id
+         ORDER BY degree DESC, n.id ASC
+         LIMIT ?1",
+    )?;
+
+    let raw_nodes: Vec<(String, Option<String>, i64)> = node_stmt
+        .query_map([limit as i64], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let node_ids: std::collections::HashSet<String> =
+        raw_nodes.iter().map(|(id, _, _)| id.clone()).collect();
+
+    let mut link_stmt = conn.prepare("SELECT source, dest FROM links WHERE type = 'id'")?;
+    let links: Vec<GraphLink> = link_stmt
+        .query_map([], |row| {
+            Ok(GraphLink {
+                source: row.get(0)?,
+                target: row.get(1)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .filter(|l| node_ids.contains(&l.source) && node_ids.contains(&l.target))
+        .collect();
+
+    let mut tag_stmt = conn.prepare("SELECT tag FROM tags WHERE node_id = ?1")?;
+    let nodes: Vec<GraphNode> = raw_nodes
+        .into_iter()
+        .map(|(id, title, degree)| {
+            let tags: Vec<String> = tag_stmt
+                .query_map([&id], |row| row.get(0))
+                .ok()
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .unwrap_or_default();
+            GraphNode {
+                id,
+                title,
+                tags,
+                link_count: degree.max(0) as usize,
+            }
+        })
+        .collect();
+
+    Ok(BoundedGraphData {
+        truncated: nodes.len() < total_nodes,
+        returned_nodes: nodes.len(),
+        returned_links: links.len(),
+        nodes,
+        links,
+        total_nodes,
+        total_links,
+    })
+}
+
 /// Find a daily note node by date string (YYYY-MM-DD)
 pub fn find_daily_note(conn: &Connection, date: &str) -> rusqlite::Result<Option<NodeRecord>> {
-    // First try: node whose title matches the date
+    // First try: node whose title matches the date. Prefer an exact title, then a
+    // node living under daily/, then the shortest title — never an arbitrary row.
     let node = conn.query_row(
         "SELECT id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp
          FROM nodes
          WHERE title = ?1 OR title LIKE ?2
+         ORDER BY
+           CASE WHEN title = ?1 THEN 0 ELSE 1 END,
+           CASE WHEN file LIKE '%/daily/%' OR file LIKE '%/dailies/%'
+                     OR file LIKE 'daily/%' OR file LIKE 'dailies/%' THEN 0 ELSE 1 END,
+           CASE WHEN title LIKE ?3 THEN 0 ELSE 1 END,
+           LENGTH(title) ASC,
+           file ASC,
+           id ASC
          LIMIT 1",
-        rusqlite::params![date, format!("%{date}%")],
+        rusqlite::params![date, format!("%{date}%"), format!("{date}%")],
         |row| {
             Ok(NodeRecord {
                 id: row.get(0)?,
@@ -523,7 +651,12 @@ pub fn find_daily_note(conn: &Connection, date: &str) -> rusqlite::Result<Option
         "SELECT 'file:' || file, file, 0, 0, NULL, NULL, NULL, NULL,
                 COALESCE(title, ?1), NULL, NULL
          FROM files
-         WHERE file LIKE ?2
+         WHERE file LIKE ?2 AND excluded = 0
+         ORDER BY
+           CASE WHEN file LIKE '%/daily/%' OR file LIKE '%/dailies/%'
+                     OR file LIKE 'daily/%' OR file LIKE 'dailies/%' THEN 0 ELSE 1 END,
+           LENGTH(file) ASC,
+           file ASC
          LIMIT 1",
         rusqlite::params![date, format!("%{date}%.org")],
         |row| {
@@ -552,7 +685,7 @@ pub fn list_daily_notes(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> 
     let mut stmt = conn.prepare(
         "SELECT id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp
          FROM nodes
-         WHERE title GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'
+         WHERE title GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
          UNION
          SELECT
            'file:' || file AS id, file, 0 AS level, 0 AS pos,
@@ -560,10 +693,12 @@ pub fn list_daily_notes(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> 
            COALESCE(title, REPLACE(REPLACE(file, RTRIM(file, REPLACE(file, '/', '')), ''), '.org', '')) AS title,
            NULL AS properties, NULL AS olp
          FROM files
-         WHERE (file LIKE '%/daily/%' OR file LIKE '%/dailies/%')
+         WHERE (file LIKE '%/daily/%' OR file LIKE '%/dailies/%'
+                OR file LIKE 'daily/%' OR file LIKE 'dailies/%')
            AND file LIKE '%.org'
+           AND excluded = 0
            AND file NOT IN (SELECT f.file FROM nodes n JOIN files f ON n.file = f.file
-                            WHERE n.title GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*')
+                            WHERE n.title GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
          ORDER BY title DESC
          LIMIT 100",
     )?;
@@ -637,6 +772,13 @@ pub fn get_unlinked_mentions(conn: &Connection, node_id: &str) -> rusqlite::Resu
         _ => return Ok(Vec::new()),
     };
 
+    // Match the title as a quoted phrase — a bare title with punctuation is not
+    // a valid FTS5 expression
+    let title_phrase = make_fts_phrase(&title);
+    if title_phrase.is_empty() {
+        return Ok(Vec::new());
+    }
+
     // Find files that mention this title in body text but don't have a link to this node
     let mut stmt = conn.prepare(
         "SELECT f.file, f.title, snippet(files_fts, 2, '<<', '>>', '...', 30)
@@ -657,7 +799,7 @@ pub fn get_unlinked_mentions(conn: &Connection, node_id: &str) -> rusqlite::Resu
         .query_row("SELECT file FROM nodes WHERE id = ?1", [node_id], |row| row.get(0))
         .ok();
 
-    let rows = stmt.query_map([&title], |row| {
+    let rows = stmt.query_map([&title_phrase], |row| {
         let file: String = row.get(0)?;
         let file_title: Option<String> = row.get(1)?;
         let snippet: Option<String> = row.get(2)?;

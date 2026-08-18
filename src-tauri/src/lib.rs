@@ -1,4 +1,5 @@
 mod commands;
+mod fsutil;
 mod state;
 mod watcher;
 
@@ -34,12 +35,14 @@ pub fn run() {
             commands::node::rename_node,
             // Editor
             commands::editor::read_file,
+            commands::editor::read_file_meta,
             commands::editor::save_file,
             commands::editor::create_file,
             commands::editor::import_image,
             commands::editor::quick_capture,
             // Graph
             commands::graph::get_graph_data,
+            commands::graph::get_graph_data_limited,
             // Daily notes
             commands::daily::get_or_create_daily,
             commands::daily::list_daily_notes,

@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { vault } from '$lib/stores/vault.svelte';
-	import { getGraphData } from '$lib/tauri/commands';
+	import { getGraphDataLimited, type BoundedGraphData } from '$lib/tauri/commands';
 	import GraphView from '$lib/components/graph/GraphView.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
-	import type { GraphData } from '$lib/types/node';
 
-	let graphData = $state<GraphData | null>(null);
+	/** Drawing every node of a large vault locks up the main thread, so ask for a slice. */
+	const MAX_RENDERED_NODES = 500;
+
+	let graphData = $state<BoundedGraphData | null>(null);
+	let isLoading = $state(true);
 	let error = $state<string | null>(null);
 	let graphView: GraphView;
 	let showOrphans = $state(false);
@@ -17,11 +20,23 @@
 			: []
 	);
 
+	function count(n: number): string {
+		return n.toLocaleString();
+	}
+
 	$effect(() => { loadGraph(); });
 
 	async function loadGraph() {
-		try { graphData = await getGraphData(); }
-		catch (e) { error = String(e); }
+		isLoading = true;
+		error = null;
+		try {
+			graphData = await getGraphDataLimited(MAX_RENDERED_NODES);
+		} catch (e) {
+			graphData = null;
+			error = String(e);
+		} finally {
+			isLoading = false;
+		}
 	}
 
 	function openRandom() {
@@ -39,11 +54,17 @@
 		</button>
 		<h1 class="flex-1 text-lg font-semibold">Graph</h1>
 		{#if graphData}
-			<span class="text-xs text-surface-700 dark:text-surface-300">{graphData.nodes.length} nodes</span>
+			<span class="text-xs text-surface-700 dark:text-surface-300">
+				{count(graphData.returned_nodes)}{#if graphData.truncated} of {count(graphData.total_nodes)}{/if} notes
+			</span>
 		{/if}
 	</header>
 
-	{#if error}<div class="bg-red-50 p-3 text-sm text-red-600 dark:bg-red-950 dark:text-red-400">{error}</div>{/if}
+	{#if graphData?.truncated}
+		<div class="shrink-0 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+			Showing the {count(graphData.returned_nodes)} most-connected of {count(graphData.total_nodes)} notes in this vault — the rest are left out to keep the graph smooth. Use search to reach them.
+		</div>
+	{/if}
 
 	<div class="relative flex-1">
 		{#if graphData}
@@ -93,8 +114,19 @@
 					{/if}
 				</div>
 			{/if}
-		{:else}
+		{:else if isLoading}
 			<div class="flex h-full items-center justify-center"><p class="text-surface-700 dark:text-surface-300">Loading graph...</p></div>
+		{:else}
+			<div class="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+				<p class="text-sm font-medium text-red-600 dark:text-red-400">Could not load the graph</p>
+				{#if error}<p class="max-w-sm text-xs text-red-600/80 dark:text-red-400/80">{error}</p>{/if}
+				<button
+					onclick={loadGraph}
+					class="mt-1 rounded-lg border border-surface-200 px-3 py-1.5 text-sm font-medium hover:bg-surface-100 dark:border-surface-700 dark:hover:bg-surface-800"
+				>
+					Try again
+				</button>
+			</div>
 		{/if}
 	</div>
 
