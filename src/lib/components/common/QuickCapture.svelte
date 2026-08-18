@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { quickCapture } from '$lib/tauri/commands';
+	import { quickCapture, localDate, localTime } from '$lib/tauri/commands';
 
 	let open = $state(false);
 	let text = $state('');
@@ -10,7 +10,7 @@
 		if (!text.trim()) return;
 		saving = true;
 		try {
-			await quickCapture(text.trim());
+			await quickCapture(text.trim(), localDate(), localTime());
 			text = '';
 			saved = true;
 			setTimeout(() => { saved = false; open = false; }, 800);

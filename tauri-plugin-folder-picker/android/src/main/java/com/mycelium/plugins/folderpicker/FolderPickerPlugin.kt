@@ -94,15 +94,23 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
             val imeHeight = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
             val navBarHeight = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
 
+            // The IME inset already covers the nav bar area the toolbar sits in, so
+            // subtract it; a split-screen/floating IME can report less than the nav
+            // bar, which would otherwise push the toolbar off-screen.
+            val offset = (imeHeight - navBarHeight).coerceAtLeast(0)
+
             if (imeVisible && imeHeight > 0) {
                 toolbar.visibility = View.VISIBLE
-                toolbar.translationY = -(imeHeight - navBarHeight).toFloat()
+                toolbar.translationY = -offset.toFloat()
             } else {
                 toolbar.visibility = View.GONE
                 toolbar.translationY = 0f
             }
             insets
         }
+
+        // Position correctly if the keyboard is already up when the toolbar installs
+        ViewCompat.requestApplyInsets(rootView)
     }
 
     private fun createToolbarView(wv: WebView): View {
@@ -226,8 +234,8 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
                     .setItems(items.toTypedArray()) { dialog, which ->
                         val selected = when {
                             which == 0 -> "null"
-                            which <= todoKw.size -> "'${todoKw[which - 1]}'"
-                            else -> "'${doneKw[which - 1 - todoKw.size]}'"
+                            which <= todoKw.size -> jsString(todoKw[which - 1])
+                            else -> jsString(doneKw[which - 1 - todoKw.size])
                         }
                         wv.evaluateJavascript("window.__myceliumToolbar?.todoSet($selected)", null)
                         dialog.dismiss()
@@ -272,7 +280,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
                 AlertDialog.Builder(activity)
                     .setTitle("Set Priority")
                     .setItems(items.toTypedArray()) { dialog, which ->
-                        val selected = if (which == 0) "null" else "'${priorities[which - 1]}'"
+                        val selected = if (which == 0) "null" else jsString(priorities[which - 1])
                         wv.evaluateJavascript("window.__myceliumToolbar?.prioritySet($selected)", null)
                         dialog.dismiss()
                     }
@@ -341,7 +349,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
                         .setItems(items.toTypedArray()) { dialog, which ->
                             if (which < displayTags.size) {
                                 val tag = displayTags[which]
-                                wv.evaluateJavascript("window.__myceliumToolbar?.tagSet('$tag')", null)
+                                wv.evaluateJavascript("window.__myceliumToolbar?.tagSet(${jsString(tag)})", null)
                             } else {
                                 // Add new tag
                                 val input = android.widget.EditText(activity).apply {
@@ -354,7 +362,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
                                     .setPositiveButton("Add") { _, _ ->
                                         val tag = input.text.toString().trim()
                                         if (tag.isNotEmpty()) {
-                                            wv.evaluateJavascript("window.__myceliumToolbar?.tagSet('$tag')", null)
+                                            wv.evaluateJavascript("window.__myceliumToolbar?.tagSet(${jsString(tag)})", null)
                                         }
                                     }
                                     .setNegativeButton("Cancel", null)
@@ -370,7 +378,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun showDatePicker(type: String, wv: WebView) {
-        val jsGet = "window.__myceliumToolbar?.getExisting?.('$type') ?? ''"
+        val jsGet = "window.__myceliumToolbar?.getExisting?.(${jsString(type)}) ?? ''"
         wv.evaluateJavascript(jsGet) { result ->
             val existingStr = result?.trim('"') ?: ""
             Handler(Looper.getMainLooper()).post {
@@ -392,7 +400,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
                         val dayFmt = SimpleDateFormat("EEE", Locale.US)
                         val timestamp = "<${dateFmt.format(cal.time)} ${dayFmt.format(cal.time)}>"
                         val jsType = if (type == "deadline") "deadlineSet" else "scheduledSet"
-                        wv.evaluateJavascript("window.__myceliumToolbar?.$jsType('$timestamp')", null)
+                        wv.evaluateJavascript("window.__myceliumToolbar?.$jsType(${jsString(timestamp)})", null)
                     },
                     cal.get(Calendar.YEAR),
                     cal.get(Calendar.MONTH),
@@ -415,6 +423,14 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
 
     private fun dpToPx(dp: Int): Int {
         return (dp * activity.resources.displayMetrics.density).toInt()
+    }
+
+    /** Encode a value as a JavaScript string literal (quotes included) so it can be
+     *  interpolated into a script passed to evaluateJavascript safely. */
+    private fun jsString(value: String): String {
+        return JSONObject.quote(value)
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
     }
 
     private fun jsonArrayToList(arr: JSONArray?): List<String>? {

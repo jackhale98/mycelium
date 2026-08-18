@@ -89,6 +89,25 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
         ",
     )?;
 
+    migrate_files_excluded(conn)?;
+
+    Ok(())
+}
+
+/// Add the `excluded` column to `files` on databases created before it existed.
+fn migrate_files_excluded(conn: &Connection) -> rusqlite::Result<()> {
+    let has_column = conn
+        .prepare("PRAGMA table_info(files)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .any(|name| name == "excluded");
+
+    if !has_column {
+        conn.execute_batch(
+            "ALTER TABLE files ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+
     Ok(())
 }
 
@@ -127,6 +146,46 @@ pub fn init_fts(conn: &Connection) -> rusqlite::Result<()> {
     )?;
 
     Ok(())
+}
+
+/// Rebuild the external-content FTS index for `nodes_fts` from the `nodes` table.
+/// `DELETE FROM nodes_fts` does NOT purge an external-content index — this does.
+pub fn rebuild_fts(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');")
+}
+
+/// Verify the `nodes_fts` index matches the `nodes` table.
+pub fn check_fts_integrity(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("INSERT INTO nodes_fts(nodes_fts) VALUES('integrity-check');")
+}
+
+/// Repair `nodes_fts` if it has drifted from `nodes`.
+/// Returns true if a rebuild was performed.
+pub fn repair_fts(conn: &Connection) -> rusqlite::Result<bool> {
+    match check_fts_integrity(conn) {
+        Ok(()) => Ok(false),
+        Err(_) => {
+            rebuild_fts(conn)?;
+            Ok(true)
+        }
+    }
+}
+
+/// Clear every indexed row while keeping the schema, leaving both FTS
+/// indexes consistent afterwards.
+pub fn reset_database(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "DELETE FROM links;
+         DELETE FROM tags;
+         DELETE FROM aliases;
+         DELETE FROM refs;
+         DELETE FROM citations;
+         DELETE FROM headlines;
+         DELETE FROM nodes;
+         DELETE FROM files;
+         DELETE FROM files_fts;",
+    )?;
+    rebuild_fts(conn)
 }
 
 #[cfg(test)]

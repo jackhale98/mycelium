@@ -2,8 +2,7 @@ use crate::state::AppState;
 use crate::watcher;
 use db::sync;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 /// Open a vault directory, initialize the database, sync, and start file watcher
 #[tauri::command]
@@ -24,20 +23,19 @@ pub async fn open_vault(
     // Sync vault
     let result = sync::sync_vault(&conn, &path).map_err(|e| e.to_string())?;
 
-    // Store in app state
-    *state.db.lock().map_err(|e| e.to_string())? = Some(conn);
-    *state.vault_path.lock().map_err(|e| e.to_string())? = Some(vault_path);
+    // Let the webview load images out of the vault through the asset protocol.
+    if let Err(e) = app.asset_protocol_scope().allow_directory(&vault_path, true) {
+        eprintln!("Failed to grant asset access to vault: {e}");
+    }
+
+    // Store in app state, replacing any previously open vault
+    state.stop_watcher();
+    state.clear_own_writes();
+    state.set_db(Some(conn));
+    state.set_vault_path(Some(vault_path));
 
     // Start file watcher (desktop only, non-blocking)
-    let state_arc = Arc::new(AppState::new());
-    // Share the same db connection for watcher by re-opening
-    {
-        let watcher_conn = db::open_db(&path).map_err(|e| e.to_string())?;
-        *state_arc.db.lock().map_err(|e| e.to_string())? = Some(watcher_conn);
-        *state_arc.vault_path.lock().map_err(|e| e.to_string())? =
-            Some(PathBuf::from(&path));
-    }
-    let _ = watcher::start_watcher(app, state_arc, path);
+    state.set_watcher(watcher::start_watcher(app, path));
 
     Ok(result)
 }
@@ -90,21 +88,9 @@ pub async fn rebuild_database(
     let path_str = vault_path.to_string_lossy().to_string();
 
     let result = state.with_db(|conn| {
-        // Drop all existing data (disable FK checks to avoid cascade issues)
-        conn.execute_batch(
-            "PRAGMA foreign_keys=OFF;
-             DELETE FROM links;
-             DELETE FROM tags;
-             DELETE FROM aliases;
-             DELETE FROM refs;
-             DELETE FROM citations;
-             DELETE FROM headlines;
-             DELETE FROM nodes;
-             DELETE FROM files;
-             DELETE FROM nodes_fts;
-             DELETE FROM files_fts;
-             PRAGMA foreign_keys=ON;"
-        ).map_err(|e| format!("Failed to clear database: {e}"))?;
+        // `DELETE FROM nodes_fts` is a no-op on an external-content FTS5 table, so
+        // the reset goes through the FTS5 'rebuild' command instead.
+        db::reset_database(conn).map_err(|e| format!("Failed to clear database: {e}"))?;
 
         // Re-index everything
         sync::sync_vault(conn, &path_str).map_err(|e| e.to_string())

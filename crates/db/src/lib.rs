@@ -3,14 +3,19 @@ pub mod query;
 pub mod schema;
 pub mod sync;
 
+pub use index::{IdCollision, IndexReport};
 pub use query::{
-    BacklinkRecord, FileRecord, ForwardLink, GraphData, GraphLink, GraphNode,
+    BacklinkRecord, BoundedGraphData, FileRecord, ForwardLink, GraphData, GraphLink, GraphNode,
     HeadlineRecord, NodeRecord, SearchResult, TagCount,
 };
+pub use schema::{check_fts_integrity, rebuild_fts, repair_fts, reset_database};
 pub use sync::{SyncError, SyncResult};
 
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
+
+/// How long a writer waits for the WAL write lock before giving up
+const BUSY_TIMEOUT_MS: u64 = 5000;
 
 /// Get the app data directory for storing databases.
 /// Uses platform-specific conventions:
@@ -52,8 +57,16 @@ pub fn open_db(vault_path: &str) -> Result<Connection, SyncError> {
     let conn = Connection::open(&db_path)
         .map_err(|e| SyncError::Database(e.to_string()))?;
 
+    // WAL allows a single writer; the file watcher holds a second connection, so
+    // wait for the lock instead of failing the write outright.
+    conn.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))
+        .map_err(|e| SyncError::Database(e.to_string()))?;
+
     schema::init_schema(&conn).map_err(|e| SyncError::Database(e.to_string()))?;
     schema::init_fts(&conn).map_err(|e| SyncError::Database(e.to_string()))?;
+
+    // Heal an FTS index left inconsistent by an older build
+    let _ = schema::repair_fts(&conn);
 
     // Store the vault path in the DB so we can resolve relative paths
     conn.execute_batch(&format!(
@@ -69,6 +82,9 @@ pub fn open_db(vault_path: &str) -> Result<Connection, SyncError> {
 /// Open an in-memory database (for testing)
 pub fn open_memory_db() -> Result<Connection, SyncError> {
     let conn = Connection::open_in_memory()
+        .map_err(|e| SyncError::Database(e.to_string()))?;
+
+    conn.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))
         .map_err(|e| SyncError::Database(e.to_string()))?;
 
     schema::init_schema(&conn).map_err(|e| SyncError::Database(e.to_string()))?;

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
+	import { recomputeCookies, setCheckbox } from '$lib/org';
 
 	let { content = '', vaultPath = '', onLinkClick, onContentChange }: {
 		content: string;
@@ -20,15 +21,36 @@
 	const imgExts = new Set(['png','jpg','jpeg','gif','svg','webp','bmp','ico']);
 	let el: HTMLDivElement;
 
-	onMount(() => { renderContent(); });
+	// WKWebView refuses to load bare file: URLs, so vault images go through Tauri's
+	// asset protocol. Stays null in browser preview, where plain paths still work.
+	let toAssetUrl = $state<((path: string) => string) | null>(null);
+
+	function isTauri(): boolean {
+		try {
+			return typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined;
+		} catch {
+			return false;
+		}
+	}
+
+	onMount(() => {
+		if (isTauri()) {
+			import('@tauri-apps/api/core').then(({ convertFileSrc }) => {
+				toAssetUrl = (path: string) => convertFileSrc(path);
+			}).catch(() => {});
+		}
+		renderContent();
+	});
 	$effect(() => { if (el && content) renderContent(); });
 
 	function renderContent() {
+		void toAssetUrl;
 		while (el.firstChild) el.removeChild(el.firstChild);
 		const lines = content.split('\n');
 		let i = 0;
 
-		// Track sections for collapsing: each heading gets a body container
+		// Heading sections nest by level, so collapsing one hides its whole subtree.
+		const openSections: { level: number; body: HTMLElement }[] = [];
 		let currentBody: HTMLElement = el;
 
 		while (i < lines.length) {
@@ -42,8 +64,10 @@
 			const hm = t.match(/^(\*+)\s+(.*)/);
 			if (hm) {
 				const level = hm[1].length;
-				// Reset to top level container
-				currentBody = el;
+				while (openSections.length && openSections[openSections.length - 1].level >= level) {
+					openSections.pop();
+				}
+				const parent = openSections.length ? openSections[openSections.length - 1].body : el;
 
 				const section = mk('div', '');
 				const header = mk('div', 'margin-top:' + (level === 1 ? '20px' : '12px') + ';display:flex;align-items:center;gap:6px;flex-wrap:wrap;cursor:pointer;user-select:none');
@@ -77,7 +101,8 @@
 
 				section.appendChild(header);
 				section.appendChild(body);
-				el.appendChild(section);
+				parent.appendChild(section);
+				openSections.push({ level, body });
 				currentBody = body;
 				i++; continue;
 			}
@@ -157,11 +182,10 @@
 
 	function toggleCheckbox(lineIdx: number, checked: boolean) {
 		const lines = content.split('\n');
-		if (lineIdx >= 0 && lineIdx < lines.length) {
-			if (checked) lines[lineIdx] = lines[lineIdx].replace('[ ]', '[X]');
-			else lines[lineIdx] = lines[lineIdx].replace(/\[[Xx]\]/, '[ ]');
-			onContentChange?.(lines.join('\n'));
-		}
+		if (lineIdx < 0 || lineIdx >= lines.length) return;
+		const next = recomputeCookies(setCheckbox(lines, lineIdx, checked ? 'checked' : 'unchecked'));
+		const joined = next.join('\n');
+		if (joined !== content) onContentChange?.(joined);
 	}
 
 	function mk(tag: string, css: string): HTMLElement {
@@ -171,15 +195,27 @@
 	}
 
 	function resolveImagePath(path: string): string {
-		// If absolute, use as-is; if relative, resolve against vault path
-		if (path.startsWith('/') || path.startsWith('http')) return path;
-		if (vaultPath) return vaultPath.replace(/\/$/, '') + '/' + path.replace(/^\.\//, '');
-		return path;
+		if (/^(https?|data|blob|asset):/i.test(path) || path.startsWith('//')) return path;
+
+		const clean = path.replace(/^\.\//, '');
+		const absolute = clean.startsWith('/')
+			? clean
+			: vaultPath
+				? vaultPath.replace(/\/$/, '') + '/' + clean
+				: clean;
+
+		return toAssetUrl ? toAssetUrl(absolute) : absolute;
 	}
 
 	function isImagePath(path: string): boolean {
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
 		return imgExts.has(ext);
+	}
+
+	interface InlineMatch { idx: number; len: number; fn: () => Node }
+
+	function closest(best: InlineMatch | null, idx: number, len: number, fn: () => Node): InlineMatch {
+		return !best || idx < best.idx ? { idx, len, fn } : best;
 	}
 
 	function inl(target: HTMLElement | string, parentOrText?: HTMLElement | string) {
@@ -191,41 +227,48 @@
 
 		let r = text;
 		while (r.length > 0) {
-			let best: {idx:number;len:number;fn:()=>Node}|null = null;
+			let best: InlineMatch | null = null;
 
 			const lm = r.match(/\[\[id:([^\]]+?)\]\[([^\]]*?)\]\]/);
-			if (lm?.index !== undefined && (!best || lm.index < best.idx))
-				best = {idx:lm.index, len:lm[0].length, fn:()=>{ const s=mk('span','color:#16a34a;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-weight:500'); s.textContent=lm![2]; s.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();onLinkClick?.(lm![1]);}); return s; }};
+			if (lm?.index !== undefined)
+				best = closest(best, lm.index, lm[0].length, ()=>{ const s=mk('span','color:#16a34a;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-weight:500'); s.textContent=lm[2]; s.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();onLinkClick?.(lm[1]);}); return s; });
 
 			const lm2 = r.match(/\[\[id:([^\]]+?)\]\]/);
-			if (lm2?.index !== undefined && (!best || lm2.index < best.idx))
-				best = {idx:lm2.index, len:lm2[0].length, fn:()=>{ const s=mk('span','color:#16a34a;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-weight:500'); s.textContent=lm2![1]; s.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();onLinkClick?.(lm2![1]);}); return s; }};
+			if (lm2?.index !== undefined)
+				best = closest(best, lm2.index, lm2[0].length, ()=>{ const s=mk('span','color:#16a34a;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-weight:500'); s.textContent=lm2[1]; s.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();onLinkClick?.(lm2[1]);}); return s; });
 
 			// Inline image: [[file:img.png]] or [[./img.png]]
 			const fim = r.match(/\[\[(?:file:)?([^\]]+?)\]\]/);
-			if (fim?.index !== undefined && isImagePath(fim[1]) && (!best || fim.index < best.idx))
-				best = {idx:fim.index, len:fim[0].length, fn:()=>{ const img=document.createElement('img'); img.src=resolveImagePath(fim![1]); img.alt=fim![1].split('/').pop()??fim![1]; img.style.cssText='max-width:100%;border-radius:6px;display:inline-block;vertical-align:middle;max-height:300px'; return img; }};
+			if (fim?.index !== undefined && isImagePath(fim[1]))
+				best = closest(best, fim.index, fim[0].length, ()=>{ const img=document.createElement('img'); img.src=resolveImagePath(fim[1]); img.alt=fim[1].split('/').pop()??fim[1]; img.style.cssText='max-width:100%;border-radius:6px;display:inline-block;vertical-align:middle;max-height:300px'; return img; });
 
 			const bm = r.match(/(^|[\s(])\*(\S[^*]*?\S|\S)\*([\s.,;:!?)]|$)/);
-			if (bm?.index !== undefined) { const off=bm[1].length; const idx=bm.index+off; if(!best||idx<best.idx) best={idx,len:bm[2].length+2,fn:()=>{const b=document.createElement('b');b.textContent=bm![2];return b;}}; }
+			if (bm?.index !== undefined)
+				best = closest(best, bm.index+bm[1].length, bm[2].length+2, ()=>{const b=document.createElement('b');b.textContent=bm[2];return b;});
 
 			const im = r.match(/(^|[\s(])\/(\S[^/]*?\S|\S)\/([\s.,;:!?)]|$)/);
-			if (im?.index !== undefined) { const off=im[1].length; const idx=im.index+off; if(!best||idx<best.idx) best={idx,len:im[2].length+2,fn:()=>{const e=document.createElement('i');e.textContent=im![2];return e;}}; }
+			if (im?.index !== undefined)
+				best = closest(best, im.index+im[1].length, im[2].length+2, ()=>{const e=document.createElement('i');e.textContent=im[2];return e;});
 
 			const cm = r.match(/~(\S[^~]*?\S|\S)~/);
-			if (cm?.index !== undefined && (!best||cm.index<best.idx)) best={idx:cm.index,len:cm[0].length,fn:()=>{const c=mk('code','font-family:monospace;font-size:0.85em;background:#e2e8f0;padding:1px 4px;border-radius:3px;color:#be123c');c.textContent=cm![1];return c;}};
+			if (cm?.index !== undefined)
+				best = closest(best, cm.index, cm[0].length, ()=>{const c=mk('code','font-family:monospace;font-size:0.85em;background:#e2e8f0;padding:1px 4px;border-radius:3px;color:#be123c');c.textContent=cm[1];return c;});
 
 			const vm = r.match(/(^|[\s(])=(\S[^=]*?\S|\S)=([\s.,;:!?)]|$)/);
-			if (vm?.index !== undefined) { const off=vm[1].length; const idx=vm.index+off; if(!best||idx<best.idx) best={idx,len:vm[2].length+2,fn:()=>{const c=mk('code','font-family:monospace;font-size:0.85em;background:#e2e8f0;padding:1px 4px;border-radius:3px;color:#1e293b');c.textContent=vm![2];return c;}}; }
+			if (vm?.index !== undefined)
+				best = closest(best, vm.index+vm[1].length, vm[2].length+2, ()=>{const c=mk('code','font-family:monospace;font-size:0.85em;background:#e2e8f0;padding:1px 4px;border-radius:3px;color:#1e293b');c.textContent=vm[2];return c;});
 
 			const sm = r.match(/(^|[\s(])\+(\S[^+]*?\S|\S)\+([\s.,;:!?)]|$)/);
-			if (sm?.index !== undefined) { const off=sm[1].length; const idx=sm.index+off; if(!best||idx<best.idx) best={idx,len:sm[2].length+2,fn:()=>{const s=document.createElement('s');s.style.color='#9ca3af';s.textContent=sm![2];return s;}}; }
+			if (sm?.index !== undefined)
+				best = closest(best, sm.index+sm[1].length, sm[2].length+2, ()=>{const s=document.createElement('s');s.style.color='#9ca3af';s.textContent=sm[2];return s;});
 
 			const um = r.match(/(^|[\s(])_(\S[^_]*?\S|\S)_([\s.,;:!?)]|$)/);
-			if (um?.index !== undefined) { const off=um[1].length; const idx=um.index+off; if(!best||idx<best.idx) best={idx,len:um[2].length+2,fn:()=>{const u=document.createElement('u');u.textContent=um![2];return u;}}; }
+			if (um?.index !== undefined)
+				best = closest(best, um.index+um[1].length, um[2].length+2, ()=>{const u=document.createElement('u');u.textContent=um[2];return u;});
 
 			const tsm = r.match(/<(\d{4}-\d{2}-\d{2}[^>]*?)>/);
-			if (tsm?.index !== undefined && (!best||tsm.index<best.idx)) best={idx:tsm.index,len:tsm[0].length,fn:()=>{const s=mk('span','font-size:0.8em;color:#7c3aed;background:#f5f3ff;padding:1px 4px;border-radius:3px');s.textContent=tsm![1];return s;}};
+			if (tsm?.index !== undefined)
+				best = closest(best, tsm.index, tsm[0].length, ()=>{const s=mk('span','font-size:0.8em;color:#7c3aed;background:#f5f3ff;padding:1px 4px;border-radius:3px');s.textContent=tsm[1];return s;});
 
 			if (best) {
 				if (best.idx > 0) parent.appendChild(document.createTextNode(r.slice(0, best.idx)));

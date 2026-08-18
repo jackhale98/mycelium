@@ -15,7 +15,10 @@ pub fn parse_list(lines: &[&str], start: usize) -> Option<(List, usize)> {
             items.push(item);
             i += 1;
         } else if i > start && !lines[i].trim().is_empty() && lines[i].starts_with(' ') {
-            // Continuation line
+            // Continuation line: its inline content belongs to the preceding item
+            if let Some(last) = items.last_mut() {
+                last.content.extend(parse_inline_content(lines[i].trim_start()));
+            }
             raw.push_str(lines[i]);
             raw.push('\n');
             i += 1;
@@ -36,7 +39,7 @@ fn parse_list_item(line: &str) -> Option<ListItem> {
     let indent = line.len() - line.trim_start().len();
     let trimmed = line.trim_start();
 
-    let (bullet, rest) = parse_bullet(trimmed)?;
+    let (bullet, rest) = parse_bullet(trimmed, indent)?;
 
     let (checkbox, rest) = parse_checkbox(rest);
     let (tag, rest) = parse_description_tag(rest);
@@ -53,11 +56,17 @@ fn parse_list_item(line: &str) -> Option<ListItem> {
     })
 }
 
-fn parse_bullet(s: &str) -> Option<(String, &str)> {
-    // Unordered: "- ", "+ ", "* " (only at list level, not headline)
+fn parse_bullet(s: &str, indent: usize) -> Option<(String, &str)> {
+    // Unordered: "- ", "+ ", "* " (an asterisk bullet only counts when indented)
     for prefix in &["- ", "+ "] {
         if let Some(rest) = s.strip_prefix(prefix) {
             return Some((prefix.trim().to_string(), rest));
+        }
+    }
+
+    if indent > 0 {
+        if let Some(rest) = s.strip_prefix("* ") {
+            return Some(("*".to_string(), rest));
         }
     }
 
@@ -136,5 +145,29 @@ mod tests {
         let lines = vec!["- Term :: Definition here"];
         let (list, _) = parse_list(&lines, 0).unwrap();
         assert_eq!(list.items[0].tag.as_deref(), Some("Term"));
+    }
+
+    #[test]
+    fn test_indented_asterisk_bullet() {
+        let lines = vec!["  * Item one", "  * Item two"];
+        let (list, count) = parse_list(&lines, 0).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(list.items[0].bullet, "*");
+        assert_eq!(list.items[0].indent, 2);
+    }
+
+    #[test]
+    fn test_column_zero_asterisk_is_not_a_list() {
+        assert!(parse_list(&["* Heading"], 0).is_none());
+    }
+
+    #[test]
+    fn test_continuation_line_content_extracted() {
+        let lines = vec!["- Item wrapping", "  onto [[id:target][Target]] here"];
+        let (list, count) = parse_list(&lines, 0).unwrap();
+        assert_eq!(count, 2);
+        let links = crate::link::extract_links_from_content(&list.items[0].content);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].path, "target");
     }
 }

@@ -6,12 +6,14 @@
 	let query = $state('');
 	let results = $state<NodeRecord[]>([]);
 	let selectedIndex = $state(0);
+	let error = $state<string | null>(null);
 	let searchTimeout: ReturnType<typeof setTimeout>;
 
 	function handleInput() {
 		clearTimeout(searchTimeout);
 		if (!query.trim()) {
 			results = [];
+			error = null;
 			return;
 		}
 		searchTimeout = setTimeout(doSearch, 150);
@@ -19,11 +21,13 @@
 
 	async function doSearch() {
 		if (!query.trim()) return;
+		error = null;
 		try {
 			results = await searchNodes(query.trim());
 			selectedIndex = 0;
-		} catch {
+		} catch (e) {
 			results = [];
+			error = String(e);
 		}
 	}
 
@@ -68,7 +72,18 @@
 			autofocus
 		/>
 
-		{#if results.length > 0}
+		{#if error}
+			<div class="p-4 text-center">
+				<p class="text-sm font-medium text-red-600 dark:text-red-400">Search failed</p>
+				<p class="mt-1 text-xs text-red-600/80 dark:text-red-400/80">{error}</p>
+				<button
+					onclick={doSearch}
+					class="mt-2 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900"
+				>
+					Try again
+				</button>
+			</div>
+		{:else if results.length > 0}
 			<ul class="max-h-64 overflow-y-auto p-1">
 				{#each results as node, i}
 					<li>

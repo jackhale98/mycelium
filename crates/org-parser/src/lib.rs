@@ -15,11 +15,38 @@ pub mod timestamp;
 
 use cst::*;
 
+/// Options controlling how a document is parsed.
+#[derive(Debug, Clone, Default)]
+pub struct ParseOptions {
+    /// Explicit TODO/DONE keyword set. When `None`, per-file `#+TODO:` declarations are
+    /// honored if present, otherwise the process-global set from `set_todo_keywords`.
+    pub todo_keywords: Option<Vec<String>>,
+}
+
 /// Parse an org-mode document from text.
 /// Returns a CST that preserves all whitespace for round-trip serialization.
 pub fn parse(input: &str) -> OrgDocument {
+    parse_document_with_options(input, &ParseOptions::default())
+}
+
+/// Parse an org-mode document using an explicit TODO keyword set,
+/// bypassing both per-file declarations and the process-global set.
+pub fn parse_with_keywords(input: &str, keywords: &[String]) -> OrgDocument {
+    parse_document_with_options(
+        input,
+        &ParseOptions {
+            todo_keywords: Some(keywords.to_vec()),
+        },
+    )
+}
+
+/// Parse an org-mode document with explicit options.
+pub fn parse_document_with_options(input: &str, options: &ParseOptions) -> OrgDocument {
     let lines: Vec<&str> = input.lines().collect();
+    let offsets = line_offsets(input, &lines);
     let mut doc = OrgDocument::new();
+    doc.line_ending = LineEnding::detect(input);
+    doc.final_newline = input.ends_with('\n');
     let mut i = 0;
 
     // Parse file-level property drawer, metadata, and preamble (before first headline)
@@ -37,12 +64,25 @@ pub fn parse(input: &str) -> OrgDocument {
         let line = lines[i];
 
         // Check for headline
-        if headline::parse_headline(line).is_some() {
+        if headline::is_headline(line) {
             break;
+        }
+
+        // A block in the preamble is preserved verbatim so its contents can't be
+        // mistaken for headlines or metadata
+        if let Some((_, count)) = block::parse_block(&lines, i) {
+            for block_line in &lines[i..i + count] {
+                preamble_lines.push(*block_line);
+                doc.preamble_items
+                    .push(PreambleItem::Text(block_line.to_string()));
+            }
+            i += count;
+            continue;
         }
 
         // Check for metadata
         if let Some(entry) = metadata::parse_metadata_line(line) {
+            doc.preamble_items.push(PreambleItem::Metadata(entry.clone()));
             doc.metadata.push(entry);
             i += 1;
             continue;
@@ -50,6 +90,7 @@ pub fn parse(input: &str) -> OrgDocument {
 
         // Preamble text
         preamble_lines.push(line);
+        doc.preamble_items.push(PreambleItem::Text(line.to_string()));
         i += 1;
     }
 
@@ -58,25 +99,53 @@ pub fn parse(input: &str) -> OrgDocument {
         doc.preamble.push('\n');
     }
 
+    let keywords = match &options.todo_keywords {
+        Some(kws) => kws.clone(),
+        None => {
+            let file_keywords = metadata::get_todo_keywords(&doc.metadata);
+            if file_keywords.is_empty() {
+                headline::todo_keywords()
+            } else {
+                file_keywords
+            }
+        }
+    };
+
     // Parse sections (headlines and their content)
-    let (sections, _) = parse_sections(&lines, i, 0);
+    let (sections, _) = parse_sections(&lines, &offsets, i, 0, &keywords);
     doc.sections = sections;
 
     doc
 }
 
+/// Byte offset of each line within the source text.
+fn line_offsets(input: &str, lines: &[&str]) -> Vec<usize> {
+    let base = input.as_ptr() as usize;
+    lines
+        .iter()
+        .map(|line| line.as_ptr() as usize - base)
+        .collect()
+}
+
 /// Parse sections at a given level. Returns sections and the line index where parsing stopped.
-fn parse_sections(lines: &[&str], start: usize, min_level: usize) -> (Vec<Section>, usize) {
+fn parse_sections(
+    lines: &[&str],
+    offsets: &[usize],
+    start: usize,
+    min_level: usize,
+    keywords: &[String],
+) -> (Vec<Section>, usize) {
     let mut sections = Vec::new();
     let mut i = start;
 
     while i < lines.len() {
-        if let Some(mut hl) = headline::parse_headline(lines[i]) {
+        if let Some(mut hl) = headline::parse_headline_with_keywords(lines[i], keywords) {
             if hl.level <= min_level && min_level > 0 {
                 // This headline is at a higher level, stop
                 break;
             }
 
+            hl.pos = offsets[i];
             i += 1;
 
             // Attach planning and properties
@@ -84,11 +153,11 @@ fn parse_sections(lines: &[&str], start: usize, min_level: usize) -> (Vec<Sectio
             i += consumed;
 
             // Parse body elements until next headline
-            let (body, next_i) = parse_body(lines, i, hl.level);
+            let (body, next_i) = parse_body(lines, i);
             i = next_i;
 
             // Parse child sections
-            let (children, next_i) = parse_sections(lines, i, hl.level);
+            let (children, next_i) = parse_sections(lines, offsets, i, hl.level, keywords);
             i = next_i;
 
             sections.push(Section {
@@ -105,19 +174,15 @@ fn parse_sections(lines: &[&str], start: usize, min_level: usize) -> (Vec<Sectio
 }
 
 /// Parse body elements (paragraphs, blocks, lists, tables, drawers) until the next headline.
-fn parse_body(lines: &[&str], start: usize, current_level: usize) -> (Vec<Element>, usize) {
+fn parse_body(lines: &[&str], start: usize) -> (Vec<Element>, usize) {
     let mut elements = Vec::new();
     let mut i = start;
 
     while i < lines.len() {
         let line = lines[i];
 
-        // Stop at next headline at same or higher level
-        if let Some(hl) = headline::parse_headline(line) {
-            if hl.level <= current_level {
-                break;
-            }
-            // Deeper headline belongs to child sections
+        // Stop at the next headline, whatever its level: deeper ones belong to child sections
+        if headline::is_headline(line) {
             break;
         }
 
@@ -272,7 +337,7 @@ fn extract_nodes_from_section(
             id: id.to_string(),
             level: section.headline.level,
             title: title_text.clone(),
-            pos: 0, // Will be set by caller based on byte offset
+            pos: section.headline.pos,
             todo: section.headline.keyword.clone(),
             priority: section.headline.priority.map(|c| c.to_string()),
             scheduled: section
@@ -311,26 +376,33 @@ pub fn extract_links(doc: &OrgDocument) -> Vec<LinkInfo> {
     if file_id.is_some() && !doc.preamble.is_empty() {
         let content = link::parse_inline_content(&doc.preamble);
         for l in link::extract_links_from_content(&content) {
-            let link_type = match &l.link_type {
-                LinkType::Id => "id",
-                LinkType::File => "file",
-                LinkType::Http => "http",
-                LinkType::Https => "https",
-                LinkType::Custom(s) => s.as_str(),
-            };
             links.push(LinkInfo {
                 source_id: file_id.clone(),
                 dest: l.path.clone(),
-                link_type: link_type.to_string(),
+                link_type: link_type_name(&l.link_type).to_string(),
                 pos: 0,
             });
         }
     }
 
     for section in &doc.sections {
-        extract_links_from_section(section, &mut links);
+        extract_links_from_section(section, &mut links, file_id.as_deref());
     }
     links
+}
+
+/// Stable string name for a link type, as stored in the database.
+pub fn link_type_name(link_type: &LinkType) -> &str {
+    match link_type {
+        LinkType::Id => "id",
+        LinkType::File => "file",
+        LinkType::Http => "http",
+        LinkType::Https => "https",
+        LinkType::Heading => "heading",
+        LinkType::CustomId => "custom-id",
+        LinkType::Target => "target",
+        LinkType::Custom(s) => s.as_str(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -341,8 +413,17 @@ pub struct LinkInfo {
     pub pos: usize,
 }
 
-fn extract_links_from_section(section: &Section, links: &mut Vec<LinkInfo>) {
-    let source_id = section.headline.id().map(|s| s.to_string());
+fn extract_links_from_section(
+    section: &Section,
+    links: &mut Vec<LinkInfo>,
+    inherited_id: Option<&str>,
+) {
+    // org-roam semantics: a headline without its own :ID: belongs to the nearest ancestor node
+    let source_id = section
+        .headline
+        .id()
+        .map(|s| s.to_string())
+        .or_else(|| inherited_id.map(|s| s.to_string()));
 
     // Extract links from ALL body elements (paragraphs, list items, verbatim text)
     for element in &section.body {
@@ -363,17 +444,10 @@ fn extract_links_from_section(section: &Section, links: &mut Vec<LinkInfo>) {
         };
 
         for l in inline_links {
-            let link_type = match &l.link_type {
-                LinkType::Id => "id",
-                LinkType::File => "file",
-                LinkType::Http => "http",
-                LinkType::Https => "https",
-                LinkType::Custom(s) => s.as_str(),
-            };
             links.push(LinkInfo {
                 source_id: source_id.clone(),
                 dest: l.path.clone(),
-                link_type: link_type.to_string(),
+                link_type: link_type_name(&l.link_type).to_string(),
                 pos: 0,
             });
         }
@@ -382,23 +456,16 @@ fn extract_links_from_section(section: &Section, links: &mut Vec<LinkInfo>) {
     // Extract from headline title
     let title_links = link::extract_links_from_content(&section.headline.title);
     for l in title_links {
-        let link_type = match &l.link_type {
-            LinkType::Id => "id",
-            LinkType::File => "file",
-            LinkType::Http => "http",
-            LinkType::Https => "https",
-            LinkType::Custom(s) => s.as_str(),
-        };
         links.push(LinkInfo {
             source_id: source_id.clone(),
             dest: l.path.clone(),
-            link_type: link_type.to_string(),
+            link_type: link_type_name(&l.link_type).to_string(),
             pos: 0,
         });
     }
 
     for child in &section.children {
-        extract_links_from_section(child, links);
+        extract_links_from_section(child, links, source_id.as_deref());
     }
 }
 
@@ -538,6 +605,180 @@ Some text.
         let doc = parse(input);
         let output = serialize::serialize(&doc);
         assert_eq!(input, output);
+    }
+
+    #[test]
+    fn test_unquoted_roam_refs() {
+        let input = ":PROPERTIES:
+:ID: file-id
+:ROAM_REFS: https://example.com
+:END:
+#+TITLE: Ref Note
+* Sub
+:PROPERTIES:
+:ID: sub-id
+:ROAM_REFS: https://one.example cite:two
+:END:
+";
+        let doc = parse(input);
+        assert_eq!(doc.file_roam_refs(), vec!["https://example.com"]);
+        assert_eq!(
+            doc.sections[0].headline.roam_refs(),
+            vec!["https://one.example", "cite:two"]
+        );
+        let nodes = extract_nodes(&doc);
+        assert_eq!(nodes[0].refs, vec!["https://example.com"]);
+        assert_eq!(nodes[1].refs, vec!["https://one.example", "cite:two"]);
+    }
+
+    #[test]
+    fn test_unterminated_drawer_keeps_headlines() {
+        let input = "* First
+:PROPERTIES:
+:ID: first-id
+:END:
+:LOGBOOK:
+- CLOCK: something
+* Second
+:PROPERTIES:
+:ID: second-id
+:END:
+Body.
+:END:
+";
+        let doc = parse(input);
+        let nodes = extract_nodes(&doc);
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[1].id, "second-id");
+        assert_eq!(serialize::serialize(&doc), input);
+    }
+
+    #[test]
+    fn test_node_pos_is_byte_offset() {
+        let input = "#+TITLE: Positions\n* One\n:PROPERTIES:\n:ID: one\n:END:\n** Two\n:PROPERTIES:\n:ID: two\n:END:\n";
+        let doc = parse(input);
+        let nodes = extract_nodes(&doc);
+        assert_eq!(nodes[0].pos, input.find("* One").unwrap());
+        assert_eq!(nodes[1].pos, input.find("** Two").unwrap());
+    }
+
+    #[test]
+    fn test_file_level_node_pos_is_zero() {
+        let input = ":PROPERTIES:\n:ID: file-id\n:END:\n#+TITLE: T\n* Child\n";
+        let doc = parse(input);
+        let nodes = extract_nodes(&doc);
+        assert_eq!(nodes[0].pos, 0);
+    }
+
+    #[test]
+    fn test_link_source_inherits_from_ancestor() {
+        let input = ":PROPERTIES:
+:ID: file-id
+:END:
+#+TITLE: Inheritance
+* Headline without an ID
+Link to [[id:target-one][One]].
+** Nested with ID
+:PROPERTIES:
+:ID: nested-id
+:END:
+Link to [[id:target-two][Two]].
+*** Deeper without ID
+Link to [[id:target-three][Three]].
+";
+        let doc = parse(input);
+        let links = extract_links(&doc);
+        assert_eq!(links.len(), 3);
+        assert_eq!(links[0].source_id.as_deref(), Some("file-id"));
+        assert_eq!(links[1].source_id.as_deref(), Some("nested-id"));
+        assert_eq!(links[2].source_id.as_deref(), Some("nested-id"));
+    }
+
+    #[test]
+    fn test_plain_url_link_extracted() {
+        let input = "* Node
+:PROPERTIES:
+:ID: source-id
+:END:
+See https://example.com/page and <https://other.example>.
+";
+        let doc = parse(input);
+        let links = extract_links(&doc);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].dest, "https://example.com/page");
+        assert_eq!(links[0].link_type, "https");
+        assert_eq!(links[1].dest, "https://other.example");
+    }
+
+    #[test]
+    fn test_internal_links_not_reported_as_file_links() {
+        let input = "* Node
+:PROPERTIES:
+:ID: source-id
+:END:
+See [[*Other Headline]] and [[#some-custom-id]].
+";
+        let doc = parse(input);
+        let links = extract_links(&doc);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].link_type, "heading");
+        assert_eq!(links[1].link_type, "custom-id");
+    }
+
+    #[test]
+    fn test_per_file_todo_keywords() {
+        let input = "#+TITLE: Workflow\n#+TODO: SPEC(s) IMPL | SHIPPED\n* SPEC Design it\n* SHIPPED Done it\n";
+        let doc = parse(input);
+        assert_eq!(
+            doc.file_todo_keywords(),
+            vec!["SPEC", "IMPL", "SHIPPED"]
+        );
+        assert_eq!(doc.sections[0].headline.keyword.as_deref(), Some("SPEC"));
+        assert_eq!(title_to_text(&doc.sections[0].headline.title), "Design it");
+        assert_eq!(doc.sections[1].headline.keyword.as_deref(), Some("SHIPPED"));
+    }
+
+    #[test]
+    fn test_parse_with_keywords_overrides() {
+        let input = "* STARTED Something\n";
+        let keywords = vec!["STARTED".to_string()];
+        let doc = parse_with_keywords(input, &keywords);
+        assert_eq!(doc.sections[0].headline.keyword.as_deref(), Some("STARTED"));
+        assert_eq!(title_to_text(&doc.sections[0].headline.title), "Something");
+
+        let doc = parse_document_with_options(input, &ParseOptions::default());
+        assert_eq!(doc.sections[0].headline.keyword, None);
+    }
+
+    #[test]
+    fn test_unescaped_star_in_preamble_block_splits_like_emacs() {
+        // Org requires comma-escaping `*` at column 0 inside literal blocks; an
+        // unescaped star is a headline in Emacs, so it must be one here too.
+        let input = "#+TITLE: Blocky\n#+BEGIN_SRC org\n* not escaped\n#+END_SRC\n* Real Headline\n";
+        let doc = parse(input);
+        assert_eq!(doc.sections.len(), 2);
+        assert_eq!(title_to_text(&doc.sections[0].headline.title), "not escaped");
+        assert_eq!(title_to_text(&doc.sections[1].headline.title), "Real Headline");
+        assert_eq!(serialize::serialize(&doc), input);
+    }
+
+    #[test]
+    fn test_escaped_star_in_preamble_block_does_not_split_file() {
+        let input = "#+TITLE: Blocky\n#+BEGIN_SRC org\n,* escaped headline\n#+END_SRC\n* Real Headline\n";
+        let doc = parse(input);
+        assert_eq!(doc.sections.len(), 1);
+        assert_eq!(title_to_text(&doc.sections[0].headline.title), "Real Headline");
+        assert_eq!(serialize::serialize(&doc), input);
+    }
+
+    #[test]
+    fn test_comment_and_archive_exposed() {
+        let input = "* COMMENT Scratch\n* Old :ARCHIVE:\n";
+        let doc = parse(input);
+        assert!(doc.sections[0].headline.is_comment);
+        assert!(!doc.sections[0].headline.is_archived());
+        assert!(doc.sections[1].headline.is_archived());
+        assert!(!doc.sections[1].headline.is_comment);
     }
 
     #[test]

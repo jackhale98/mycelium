@@ -24,7 +24,8 @@ Mycelium lets you view, edit, search, and navigate your org-roam notes on deskto
 ### Editing
 - **Source editor** — CodeMirror 6 with org-mode syntax highlighting, folding, and Cmd+Click link navigation
 - **Native keyboard toolbar** (iOS + Android) — formatting bar above the keyboard with buttons for headings, TODO, priority, tags, bold/italic/underline/strikethrough, code, lists, tables, timestamps, and more
-- **TODO management** — native picker with user-configured keywords, cycles through states
+- **TODO management** — native picker with user-configured keywords, cycles through states. Completing a task stamps `CLOSED:`; completing a repeating task (`+1w`, `++1w`, `.+1w`) shifts its dates to the next occurrence and leaves it open, as org does
+- **Per-file `#+TODO:` keywords** — a file declaring its own workflow is parsed and indexed with those keywords
 - **Priority management** — native picker with configurable priority levels
 - **Tags** — toggle file tags from a picker showing all vault tags, or add new ones. Uses `#+FILETAGS:` format.
 - **Deadline & Schedule** — native date picker with calendar view, pre-selects existing dates, supports updating and removing
@@ -34,6 +35,11 @@ Mycelium lets you view, edit, search, and navigate your org-roam notes on deskto
 - **Node refactoring** — rename a node and automatically update all backlink descriptions across the vault
 - **Image import** — pick an image file, copy it to the vault's `images/` directory, insert `[[file:images/name.png]]`
 - **Org-roam filename convention** — new files named `YYYYMMDDHHmmss-slug.org`
+
+### Safety
+- **Conflict detection** — saving checks the file on disk still matches what was loaded, so an edit made in Emacs or arriving over Syncthing/iCloud is never silently overwritten; you choose whether to reload or keep your version
+- **Atomic writes** — every vault write goes to a temp file and is renamed into place, so an app kill or power loss cannot truncate a note
+- **Unsaved edits are flushed** before navigating away and when the app is backgrounded
 
 ### Organization
 - **Agenda view** — weekly view with overdue items + tasks tab with filtering. All TODO/SCHEDULED/DEADLINE items from SQLite headlines table. Tasks sorted by deadline > scheduled > no date, then by priority. Tap items to navigate to their node.
@@ -50,14 +56,13 @@ Mycelium lets you view, edit, search, and navigate your org-roam notes on deskto
 
 ### System
 - **`#+ROAM_EXCLUDE: t`** — respected during indexing, excluded files don't appear in search/graph/agenda
-- **Regex-based link extraction** — scans raw file content with regex for `[[id:...]]` links, catching links in all contexts (paragraphs, lists, verbatim, preamble)
+- **Regex-based link extraction** — scans raw file content for `[[id:...]]` links, catching links in all contexts (paragraphs, lists, preamble), while skipping source blocks and comments
 - **Headlines table** — indexes ALL headlines from ALL org files for agenda support, not just org-roam nodes
-- **Export** to Markdown and HTML
 - **Theme system** — light, dark, and system-auto modes
 - **Configurable org settings** — TODO keywords, DONE keywords, and priority levels (persisted to localStorage)
-- **File watcher** (desktop) and re-scan on focus (mobile)
+- **File watcher** (desktop) and re-scan on focus (mobile) — stopped and restarted cleanly on vault switch, and it ignores the app's own writes
 - **Database rebuild** — settings option to drop and re-index from scratch
-- **Round-trip fidelity** — the org parser preserves all whitespace and formatting (87+ tests)
+- **Round-trip fidelity** — the org parser preserves whitespace, line endings (LF or CRLF), the presence or absence of a trailing newline, and the original ordering of `#+` keywords against surrounding text (171 Rust tests)
 - **Database stored in app data** — not in the vault directory, so it won't pollute your git repo
 
 ## Architecture
@@ -125,7 +130,7 @@ cargo test -p org-parser -p db
 ```
 mycelium/
 ├── crates/
-│   ├── org-parser/          # Rust org-mode parser (round-trip fidelity, 87+ tests)
+│   ├── org-parser/          # Rust org-mode parser (round-trip fidelity, 115 tests)
 │   │   ├── src/
 │   │   │   ├── cst.rs       # Concrete syntax tree types
 │   │   │   ├── headline.rs  # Headline parsing (TODO, priority, tags)

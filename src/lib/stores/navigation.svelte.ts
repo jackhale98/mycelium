@@ -1,4 +1,5 @@
 import { goto } from '$app/navigation';
+import { editor } from './editor.svelte';
 
 export type Tab = 'files' | 'graph' | 'search' | 'daily' | 'agenda' | 'settings';
 
@@ -21,7 +22,8 @@ class NavigationStore {
 	}
 
 	/** Go back to the previous page in our history stack */
-	goBack() {
+	async goBack() {
+		await editor.flush();
 		try {
 			const history = JSON.parse(sessionStorage.getItem('mycelium-nav-history') ?? '[]') as string[];
 			const prev = history.pop();
@@ -40,43 +42,51 @@ class NavigationStore {
 	}
 
 	/** Navigate to a node — uses full reload since node page reads ID on mount */
-	navigateToNode(id: string) {
+	async navigateToNode(id: string) {
+		// A reload discards the JS heap, so pending edits must reach disk first.
+		await editor.flush();
 		this.pushHistory();
 		this.activeTab = 'files';
 		window.location.href = `/vault/node/${id}`;
 	}
 
 	// Tab navigations use goto() for instant client-side transitions (no flash)
-	navigateToGraph() {
+	async navigateToGraph() {
+		await editor.flush();
 		this.pushHistory();
 		this.activeTab = 'graph';
 		goto('/vault/graph');
 	}
 
-	navigateToSearch() {
+	async navigateToSearch() {
+		await editor.flush();
 		this.pushHistory();
 		this.activeTab = 'search';
 		goto('/vault/search');
 	}
 
-	navigateToDaily() {
+	async navigateToDaily() {
+		await editor.flush();
 		this.pushHistory();
 		this.activeTab = 'daily';
 		goto('/vault/daily');
 	}
 
-	navigateToTags() {
+	async navigateToTags() {
+		await editor.flush();
 		this.pushHistory();
 		goto('/vault/tags');
 	}
 
-	navigateToVault() {
+	async navigateToVault() {
+		await editor.flush();
 		this.pushHistory();
 		this.activeTab = 'files';
 		goto('/vault');
 	}
 
-	navigateHome() {
+	async navigateHome() {
+		await editor.flush();
 		window.location.href = '/';
 	}
 

@@ -5,7 +5,7 @@
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import {
 		getNode, getBacklinks, getForwardLinks, getUnlinkedMentions,
-		readFile, saveFile, listNodes, createFile,
+		readFileMeta, saveFile, listNodes, createFile, localTimestamp, localDate, localTime,
 		renameNode, importImage,
 	} from '$lib/tauri/commands';
 	import RenderedView from '$lib/components/editor/RenderedView.svelte';
@@ -17,6 +17,12 @@
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import type { NodeRecord, BacklinkRecord, ForwardLink, SearchResult } from '$lib/types/node';
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
+	import {
+		applyRepeaterOnDone, getPlanning, getTodoKeyword, isDoneKeyword, nextTodoKeyword,
+		setClosed, setPlanningDate, setPriority, setTodoKeyword, removePlanning,
+		toggleFiletag, getFiletags as readFiletags, repeatKeyword,
+	} from '$lib/org';
+	import type { KeywordConfig, PlanningKind } from '$lib/org';
 
 	let node = $state<NodeRecord | null>(null);
 	let backlinks = $state<BacklinkRecord[]>([]);
@@ -37,6 +43,7 @@
 	let findCount = $state(0);
 	let findCurrent = $state(0);
 	let contentEl: HTMLDivElement;
+	let conflict = $state<string | null>(null);
 
 	// Auto-save debounce
 	$effect(() => {
@@ -54,6 +61,12 @@
 
 		const onSave = () => handleSave();
 		document.addEventListener('org-editor-save', onSave);
+		editor.saveHook = handleSave;
+		// iOS/Android can kill a backgrounded app outright, so flush on the way out.
+		const onHide = () => { if (editor.isDirty) { clearTimeout(autoSaveTimer); void handleSave(); } };
+		const onVisibility = () => { if (document.visibilityState === 'hidden') onHide(); };
+		window.addEventListener('pagehide', onHide);
+		document.addEventListener('visibilitychange', onVisibility);
 		const onKey = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key === 'e') { e.preventDefault(); showSource = !showSource; if (showFind) closeFind(); }
 			if ((e.metaKey || e.ctrlKey) && e.key === 'k' && showSource) { e.preventDefault(); showLinkSwitcher = true; }
@@ -92,39 +105,24 @@
 			tag: () => onTag(),
 			tagSet: (tag: string) => toggleTag(tag),
 			/** Return current filetags as JSON for native picker */
-			getFiletags: (): string => {
-				const lines = editor.content.split('\n');
-				for (const line of lines) {
-					if (/^\*/.test(line)) break; // stop at first heading
-					const m = line.match(/^#\+FILETAGS:\s*(.*)/i);
-					if (m) {
-						const raw = m[1].trim();
-						const tags = raw.split(':').filter(t => t.length > 0);
-						return JSON.stringify(tags);
-					}
-				}
-				return '[]';
-			},
+			getFiletags: (): string => JSON.stringify(readFiletags(splitLines(editor.content))),
 			/** Return existing date string for pre-selection in native date picker */
 			getExisting: (type: string): string => {
-				const lines = editor.content.split('\n');
-				const idx = findNearestHeadlineIdx(lines);
+				const src = splitLines(editor.content);
+				const idx = findNearestHeadlineIdx(src);
 				if (idx === -1) return '';
-				const keyword = type === 'deadline' ? 'DEADLINE:' : 'SCHEDULED:';
-				for (let j = idx + 1; j < lines.length && j <= idx + 10; j++) {
-					if (lines[j].includes(keyword)) {
-						const m = lines[j].match(/(\d{4}-\d{2}-\d{2})/);
-						return m ? m[1] : '';
-					}
-					if (/^\*+\s/.test(lines[j])) break;
-				}
-				return '';
+				const planning = getPlanning(src, idx);
+				const ts = type === 'deadline' ? planning.DEADLINE : planning.SCHEDULED;
+				return ts?.date ?? '';
 			},
 		};
 
 		return () => {
 			document.removeEventListener('org-editor-save', onSave);
 			document.removeEventListener('keydown', onKey);
+			window.removeEventListener('pagehide', onHide);
+			document.removeEventListener('visibilitychange', onVisibility);
+			if (editor.saveHook === handleSave) editor.saveHook = null;
 			delete (window as any).__myceliumToolbar;
 			clearTimeout(autoSaveTimer);
 		};
@@ -135,31 +133,68 @@
 		try {
 			node = await getNode(id);
 			if (!node) { error = 'Node not found'; return; }
-			const content = await readFile(node.file);
-			editor.openFile(node.file, content, id);
+			const file = await readFileMeta(node.file);
+			editor.openFile(node.file, file.content, id, file.hash);
+			conflict = null;
 			const [bl, fl, um] = await Promise.all([getBacklinks(id), getForwardLinks(id), getUnlinkedMentions(id)]);
 			backlinks = bl; forwardLinks = fl; unlinkedMentions = um;
 		} catch (e) { error = String(e); }
 	}
 
 	async function handleSave() {
-		if (!editor.filePath || !editor.isDirty) return;
+		if (!editor.filePath || !editor.isDirty || conflict) return;
+		// Snapshot what we send: anything typed while the write is in flight must
+		// stay dirty rather than being marked saved.
+		const snapshot = editor.content;
 		editor.isSaving = true;
 		try {
-			await saveFile(editor.filePath, editor.content);
-			editor.markSaved();
+			const hash = await saveFile(editor.filePath, snapshot, editor.savedHash ?? undefined);
+			editor.markSaved(snapshot, hash);
 			if (nodeId) {
 				const [bl, fl] = await Promise.all([getBacklinks(nodeId), getForwardLinks(nodeId)]);
 				backlinks = bl; forwardLinks = fl;
 			}
 			try { vault.updateNodes(await listNodes()); } catch {}
+		} catch (e) {
+			editor.isSaving = false;
+			const message = String(e);
+			if (message.includes('CONFLICT:')) {
+				clearTimeout(autoSaveTimer);
+				conflict = message.replace(/^.*CONFLICT:\s*/, '');
+			} else {
+				error = message;
+			}
+		}
+	}
+
+	/** Discard our buffer and take what is on disk now. */
+	async function reloadFromDisk() {
+		if (!nodeId) return;
+		conflict = null;
+		await loadNode(nodeId);
+	}
+
+	/** Keep our buffer and overwrite whatever landed on disk. */
+	async function overwriteOnDisk() {
+		if (!editor.filePath) return;
+		const snapshot = editor.content;
+		conflict = null;
+		editor.isSaving = true;
+		try {
+			const hash = await saveFile(editor.filePath, snapshot);
+			editor.markSaved(snapshot, hash);
+			if (nodeId) await loadLinks(nodeId);
 		} catch (e) { error = String(e); editor.isSaving = false; }
 	}
 
-	function handleBack() {
+	async function loadLinks(id: string) {
+		const [bl, fl] = await Promise.all([getBacklinks(id), getForwardLinks(id)]);
+		backlinks = bl; forwardLinks = fl;
+	}
+
+	async function handleBack() {
 		clearTimeout(autoSaveTimer);
-		if (editor.isDirty && editor.filePath) handleSave();
-		navigation.goBack();
+		await navigation.goBack();
 	}
 
 	function handleInsertLink(n: NodeRecord) {
@@ -173,6 +208,11 @@
 	}
 	async function handleRename() {
 		if (!nodeId || !renameTitle.trim()) return;
+		// rename_node rewrites the file from disk, so unsaved edits must land first
+		// and the pending autosave must not fire against the renamed file.
+		clearTimeout(autoSaveTimer);
+		await handleSave();
+		if (conflict || editor.isDirty) { error = 'Save your changes before renaming.'; return; }
 		try {
 			await renameNode(nodeId, renameTitle.trim());
 			showRename = false;
@@ -223,39 +263,7 @@
 
 	/** Toggle a tag in the #+FILETAGS: line */
 	function toggleTag(tag: string) {
-		modifyContent(content => {
-			const lines = content.split('\n');
-			let filetagsIdx = -1;
-			for (let i = 0; i < lines.length; i++) {
-				if (/^\*/.test(lines[i])) break;
-				if (/^#\+FILETAGS:/i.test(lines[i])) { filetagsIdx = i; break; }
-			}
-
-			if (filetagsIdx >= 0) {
-				// Parse existing tags
-				const m = lines[filetagsIdx].match(/^#\+FILETAGS:\s*(.*)/i);
-				const raw = m ? m[1].trim() : '';
-				const tags = raw.split(':').filter(t => t.length > 0);
-				const idx = tags.indexOf(tag);
-				if (idx >= 0) {
-					tags.splice(idx, 1); // remove
-				} else {
-					tags.push(tag); // add
-				}
-				lines[filetagsIdx] = tags.length > 0
-					? `#+FILETAGS: :${tags.join(':')}:`
-					: `#+FILETAGS:`;
-			} else {
-				// No #+FILETAGS: line yet — insert after #+TITLE: or at top
-				let insertAt = 0;
-				for (let i = 0; i < lines.length; i++) {
-					if (/^\*/.test(lines[i])) break;
-					if (/^#\+/i.test(lines[i])) insertAt = i + 1;
-				}
-				lines.splice(insertAt, 0, `#+FILETAGS: :${tag}:`);
-			}
-			return lines.join('\n');
-		});
+		modifyContent(content => joinLines(toggleFiletag(splitLines(content), tag), content));
 	}
 
 	// ── Find in page ──────────────────────────────────────────
@@ -368,11 +376,64 @@
 		editorComponent?.insertAtCursor(`<${ds} ${days[d.getDay()]}>`);
 	}
 
-	function todayTimestamp(): string {
-		const d = new Date();
-		const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-		const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-		return `<${ds} ${days[d.getDay()]}>`;
+
+	function keywordConfig(): KeywordConfig {
+		return {
+			todoKeywords: orgConfig?.todoKeywords ?? ['TODO'],
+			doneKeywords: orgConfig?.doneKeywords ?? ['DONE'],
+		};
+	}
+
+	/** Split preserving the file's line endings, which `join` restores. */
+	function splitLines(content: string): string[] {
+		return content.split('\n');
+	}
+
+	function joinLines(next: readonly string[], original: string): string {
+		const joined = next.join('\n');
+		return joined === original ? original : joined;
+	}
+
+	function nowForOrg() {
+		return { date: localDate(), time: localTime() };
+	}
+
+	/**
+	 * Move a headline to a new TODO state with org's completion semantics: a
+	 * repeating task is rescheduled and stays open, anything else gets a CLOSED
+	 * stamp when it becomes DONE and loses it when reopened.
+	 */
+	function applyTodoState(src: readonly string[], idx: number, keyword: string | null): string[] {
+		const config = keywordConfig();
+		const wasDone = isDoneKeyword(getTodoKeyword(src[idx], config), config);
+		const becomesDone = isDoneKeyword(keyword, config);
+		let next = [...src];
+
+		if (becomesDone && !wasDone) {
+			const repeat = applyRepeaterOnDone(next, idx, nowForOrg());
+			if (repeat.repeated) {
+				next = repeat.lines;
+				next[idx] = setTodoKeyword(next[idx], repeatKeyword(config), config);
+				return next;
+			}
+			next[idx] = setTodoKeyword(next[idx], keyword, config);
+			return setClosed(next, idx, nowForOrg());
+		}
+
+		next[idx] = setTodoKeyword(next[idx], keyword, config);
+		return wasDone && !becomesDone ? setClosed(next, idx, null) : next;
+	}
+
+	function setPlanningEntry(kind: PlanningKind, timestamp: string | null) {
+		modifyContent(content => {
+			const src = splitLines(content);
+			const idx = findNearestHeadlineIdx(src);
+			if (idx === -1) return content;
+			const next = timestamp
+				? setPlanningDate(src, idx, kind, timestamp)
+				: removePlanning(src, idx, kind);
+			return joinLines(next, content);
+		});
 	}
 
 	/** Modify the content via CodeMirror so the view stays in sync */
@@ -401,205 +462,88 @@
 		return -1;
 	}
 
-	function todoKeywordRegex(): RegExp {
-		const kws = orgConfig.allKeywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-		return new RegExp(`^(${kws.join('|')})\\s+`);
-	}
-
 	function onTodo(keyword: string | null) {
 		modifyContent(content => {
-			const lines = content.split('\n');
-			const idx = findNearestHeadlineIdx(lines);
+			const src = splitLines(content);
+			const idx = findNearestHeadlineIdx(src);
 			if (idx === -1) return content;
-			const line = lines[idx];
-			const m = line.match(/^(\*+\s+)/);
-			if (!m) return content;
-			const stars = m[1];
-			let rest = line.slice(stars.length);
-			const kwMatch = rest.match(todoKeywordRegex());
-			if (kwMatch) rest = rest.slice(kwMatch[0].length);
-			lines[idx] = keyword ? `${stars}${keyword} ${rest}` : `${stars}${rest}`;
-			return lines.join('\n');
+			return joinLines(applyTodoState(src, idx, keyword), content);
 		});
 	}
 
-	/** Cycle through TODO keywords: none -> TODO -> DONE -> none */
+	/** Cycle through the configured TODO keywords, then back to none */
 	function cycleTodo() {
-		const lines = editor.content.split('\n');
-		const idx = findNearestHeadlineIdx(lines);
+		const src = splitLines(editor.content);
+		const idx = findNearestHeadlineIdx(src);
 		if (idx === -1) return;
-		const line = lines[idx];
-		const m = line.match(/^(\*+\s+)/);
-		if (!m) return;
-		const rest = line.slice(m[1].length);
-		const allKw = [...(orgConfig?.todoKeywords ?? ['TODO']), ...(orgConfig?.doneKeywords ?? ['DONE'])];
-		const kwMatch = rest.match(/^(\S+)\s/);
-		const current = kwMatch ? kwMatch[1] : null;
-		const currentIdx = current ? allKw.indexOf(current) : -1;
-		let next: string | null;
-		if (currentIdx === -1) {
-			next = allKw[0] ?? 'TODO'; // none -> first keyword
-		} else if (currentIdx === allKw.length - 1) {
-			next = null; // last -> none
-		} else {
-			next = allKw[currentIdx + 1]; // advance
-		}
-		onTodo(next);
+		const current = getTodoKeyword(src[idx], keywordConfig());
+		onTodo(nextTodoKeyword(current, keywordConfig()));
 	}
 
 	function onPriority(priority: string | null) {
 		modifyContent(content => {
-			const lines = content.split('\n');
-			const idx = findNearestHeadlineIdx(lines);
+			const src = splitLines(content);
+			const idx = findNearestHeadlineIdx(src);
 			if (idx === -1) return content;
-			const line = lines[idx];
-			const kws = orgConfig.allKeywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-			const m = line.match(new RegExp(`^(\\*+\\s+(?:(?:${kws})\\s+)?)`));
-			if (!m) return content;
-			const prefix = m[1];
-			let rest = line.slice(prefix.length);
-			const prioMatch = rest.match(/^\[#[A-Z]\]\s*/);
-			if (prioMatch) rest = rest.slice(prioMatch[0].length);
-			lines[idx] = priority ? `${prefix}[#${priority}] ${rest}` : `${prefix}${rest}`;
-			return lines.join('\n');
+			const next = [...src];
+			next[idx] = setPriority(next[idx], priority, keywordConfig());
+			return joinLines(next, content);
 		});
 	}
 
 	function onDeadline() {
-		modifyContent(content => {
-			const lines = content.split('\n');
-			const targetLine = findNearestHeadlineIdx(lines);
-			if (targetLine === -1) return content;
-			let insertAfter = targetLine;
-			for (let j = targetLine + 1; j < lines.length; j++) {
-				const t = lines[j].trim();
-				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
-					insertAfter = j;
-					if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
-				} else break;
-			}
-			for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
-				if (lines[j].includes('DEADLINE:')) {
-					lines[j] = lines[j].replace(/DEADLINE:\s*<[^>]*>/, `DEADLINE: ${todayTimestamp()}`);
-					return lines.join('\n');
-				}
-			}
-			lines.splice(insertAfter + 1, 0, `DEADLINE: ${todayTimestamp()}`);
-			return lines.join('\n');
-		});
+		setDeadline(localDate());
 	}
 
 	function onScheduled() {
-		modifyContent(content => {
-			const lines = content.split('\n');
-			const targetLine = findNearestHeadlineIdx(lines);
-			if (targetLine === -1) return content;
-			let insertAfter = targetLine;
-			for (let j = targetLine + 1; j < lines.length; j++) {
-				const t = lines[j].trim();
-				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
-					insertAfter = j;
-					if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
-				} else break;
-			}
-			for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
-				if (lines[j].includes('SCHEDULED:')) {
-					lines[j] = lines[j].replace(/SCHEDULED:\s*<[^>]*>/, `SCHEDULED: ${todayTimestamp()}`);
-					return lines.join('\n');
-				}
-			}
-			lines.splice(insertAfter + 1, 0, `SCHEDULED: ${todayTimestamp()}`);
-			return lines.join('\n');
-		});
+		setScheduled(localDate());
 	}
 
-	/** Set deadline with a specific timestamp (from native date picker), or remove it */
+	/** Set the deadline from the native date picker, or remove it */
 	function setDeadline(timestamp: string | null) {
-		modifyContent(content => {
-			const lines = content.split('\n');
-			const targetLine = findNearestHeadlineIdx(lines);
-			if (targetLine === -1) return content;
-			let insertAfter = targetLine;
-			for (let j = targetLine + 1; j < lines.length; j++) {
-				const t = lines[j].trim();
-				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
-					insertAfter = j;
-					if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
-				} else break;
-			}
-			// Find existing DEADLINE line
-			for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
-				if (lines[j].includes('DEADLINE:')) {
-					if (timestamp) {
-						lines[j] = lines[j].replace(/DEADLINE:\s*<[^>]*>/, `DEADLINE: ${timestamp}`);
-					} else {
-						lines.splice(j, 1); // Remove the line
-					}
-					return lines.join('\n');
-				}
-			}
-			if (timestamp) {
-				lines.splice(insertAfter + 1, 0, `DEADLINE: ${timestamp}`);
-			}
-			return lines.join('\n');
-		});
+		setPlanningEntry('DEADLINE', timestamp);
 	}
 
-	/** Set scheduled with a specific timestamp (from native date picker), or remove it */
+	/** Set the scheduled date from the native date picker, or remove it */
 	function setScheduled(timestamp: string | null) {
-		modifyContent(content => {
-			const lines = content.split('\n');
-			const targetLine = findNearestHeadlineIdx(lines);
-			if (targetLine === -1) return content;
-			let insertAfter = targetLine;
-			for (let j = targetLine + 1; j < lines.length; j++) {
-				const t = lines[j].trim();
-				if (t.startsWith('SCHEDULED:') || t.startsWith('DEADLINE:') || t.startsWith('CLOSED:') || t === ':PROPERTIES:') {
-					insertAfter = j;
-					if (t === ':PROPERTIES:') { while (j < lines.length && lines[j].trim() !== ':END:') j++; insertAfter = j; }
-				} else break;
-			}
-			for (let j = targetLine + 1; j <= insertAfter + 1 && j < lines.length; j++) {
-				if (lines[j].includes('SCHEDULED:')) {
-					if (timestamp) {
-						lines[j] = lines[j].replace(/SCHEDULED:\s*<[^>]*>/, `SCHEDULED: ${timestamp}`);
-					} else {
-						lines.splice(j, 1);
-					}
-					return lines.join('\n');
-				}
-			}
-			if (timestamp) {
-				lines.splice(insertAfter + 1, 0, `SCHEDULED: ${timestamp}`);
-			}
-			return lines.join('\n');
-		});
+		setPlanningEntry('SCHEDULED', timestamp);
+	}
+
+	function isTauriRuntime(): boolean {
+		try {
+			return typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ !== undefined;
+		} catch {
+			return false;
+		}
 	}
 
 	async function onImage() {
-		try {
-			// Use Tauri dialog to pick an image file
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				multiple: false,
-				filters: [{ name: 'Images', extensions: ['png','jpg','jpeg','gif','svg','webp','bmp'] }],
-			});
-			if (!selected) return;
-			const sourcePath = selected as string;
-			const relativePath = await importImage(sourcePath);
-			editorComponent?.insertAtCursor(`[[file:${relativePath}]]`);
-		} catch {
-			// Fallback for browser mode: use file input
+		// In the app the image must actually be copied into the vault. Only browser
+		// preview falls back to a plain file input; a real import failure is an
+		// error, not a reason to insert a link to a file that was never copied.
+		if (!isTauriRuntime()) {
 			const input = document.createElement('input');
 			input.type = 'file';
 			input.accept = 'image/*';
 			input.onchange = () => {
 				const file = input.files?.[0];
-				if (file) {
-					editorComponent?.insertAtCursor(`[[file:images/${file.name}]]`);
-				}
+				if (file) editorComponent?.insertAtCursor(`[[file:images/${file.name}]]`);
 			};
 			input.click();
+			return;
+		}
+
+		try {
+			const { open } = await import('@tauri-apps/plugin-dialog');
+			const selected = await open({
+				multiple: false,
+				filters: [{ name: 'Images', extensions: ['png','jpg','jpeg','gif','svg','webp','bmp','heic'] }],
+			});
+			if (!selected) return;
+			const relativePath = await importImage(selected as string);
+			editorComponent?.insertAtCursor(`[[file:${relativePath}]]`);
+		} catch (e) {
+			error = `Could not import that image: ${e}`;
 		}
 	}
 </script>
@@ -669,6 +613,20 @@
 	</header>
 
 	{#if error}<div class="bg-red-50 px-4 py-2 text-sm text-red-600 dark:bg-red-950 dark:text-red-400">{error}</div>{/if}
+
+	{#if conflict}
+		<div class="flex flex-wrap items-center gap-3 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+			<span class="grow">This file changed on disk since you opened it. Saving now would overwrite those changes.</span>
+			<button
+				class="rounded border border-amber-300 px-2 py-1 font-medium hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900"
+				onclick={reloadFromDisk}
+			>Load their version</button>
+			<button
+				class="rounded border border-amber-300 px-2 py-1 font-medium hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900"
+				onclick={overwriteOnDisk}
+			>Keep mine</button>
+		</div>
+	{/if}
 
 	<!-- Find bar -->
 	{#if showFind}

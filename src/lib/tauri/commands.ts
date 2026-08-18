@@ -23,6 +23,33 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 	throw new Error(`No mock handler for command: ${cmd}`);
 }
 
+/// Local-time formatters. The backend never derives dates itself, so anything
+/// day-sensitive (daily notes, quick capture, org-roam filename prefixes) must be
+/// formatted here from the user's own clock. `toISOString()` is UTC and would put
+/// users west of UTC into tomorrow's note after their local afternoon.
+
+function pad(n: number, width = 2): string {
+	return String(n).padStart(width, '0');
+}
+
+/** The local calendar date as `YYYY-MM-DD`. Never UTC. */
+export function localDate(now: Date = new Date()): string {
+	return `${pad(now.getFullYear(), 4)}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** The local wall-clock time as `HH:MM`. Never UTC. */
+export function localTime(now: Date = new Date()): string {
+	return `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+/** The local date and time as the org-roam filename prefix `YYYYMMDDHHmmss`. Never UTC. */
+export function localTimestamp(now: Date = new Date()): string {
+	return (
+		`${pad(now.getFullYear(), 4)}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+		`${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+	);
+}
+
 // Vault commands
 export async function openVault(path: string): Promise<SyncResult> {
 	return invoke('open_vault', { path });
@@ -70,16 +97,36 @@ export async function searchFull(query: string): Promise<SearchResult[]> {
 }
 
 // Editor commands
+export interface FileMeta {
+	content: string;
+	hash: string;
+}
+
 export async function readFile(filePath: string): Promise<string> {
 	return invoke('read_file', { filePath });
 }
 
-export async function saveFile(filePath: string, content: string): Promise<void> {
-	return invoke('save_file', { filePath, content });
+/** Read a file together with the hash to pass back to {@link saveFile}. */
+export async function readFileMeta(filePath: string): Promise<FileMeta> {
+	return invoke('read_file_meta', { filePath });
 }
 
-export async function createFile(title: string): Promise<string> {
-	return invoke('create_file', { title });
+/**
+ * Write a file and return the hash of the newly written content.
+ * Pass the hash last read for that file as `expectedHash` to get a `CONFLICT:`
+ * error instead of clobbering an edit made outside the app.
+ */
+export async function saveFile(
+	filePath: string,
+	content: string,
+	expectedHash?: string
+): Promise<string> {
+	return invoke('save_file', { filePath, content, expectedHash });
+}
+
+/** `timestamp` is the local `YYYYMMDDHHmmss` from {@link localTimestamp}. */
+export async function createFile(title: string, timestamp: string): Promise<string> {
+	return invoke('create_file', { title, timestamp });
 }
 
 // Graph commands
@@ -87,9 +134,28 @@ export async function getGraphData(): Promise<GraphData> {
 	return invoke('get_graph_data');
 }
 
+/** A slice of the graph plus the whole-vault totals, so the UI can say what it left out. */
+export interface BoundedGraphData extends GraphData {
+	total_nodes: number;
+	total_links: number;
+	returned_nodes: number;
+	returned_links: number;
+	truncated: boolean;
+}
+
+/** The `limit` most-connected nodes, with links already restricted to that set. */
+export async function getGraphDataLimited(limit: number): Promise<BoundedGraphData> {
+	return invoke('get_graph_data_limited', { limit });
+}
+
 // Daily notes commands
-export async function getOrCreateDaily(date: string): Promise<NodeRecord> {
-	return invoke('get_or_create_daily', { date });
+/**
+ * `date` is the local `YYYY-MM-DD` from {@link localDate}. `timestamp` is the local
+ * `YYYYMMDDHHmmss` used for the filename prefix when the note has to be created;
+ * omit it to default to midnight on `date`.
+ */
+export async function getOrCreateDaily(date: string, timestamp?: string): Promise<NodeRecord> {
+	return invoke('get_or_create_daily', { date, timestamp });
 }
 
 export async function listDailyNotes(): Promise<NodeRecord[]> {
@@ -140,8 +206,13 @@ export async function getUnlinkedMentions(nodeId: string): Promise<SearchResult[
 }
 
 // Quick capture
-export async function quickCapture(text: string): Promise<string> {
-	return invoke('quick_capture', { text });
+/**
+ * Append `text` to the daily note for `localDate`, stamped with `localTime`.
+ * Both come from {@link localDate} / {@link localTime} so the capture lands in the
+ * day the user is actually in.
+ */
+export async function quickCapture(text: string, date: string, time: string): Promise<string> {
+	return invoke('quick_capture', { text, localDate: date, localTime: time });
 }
 
 // Folder picker

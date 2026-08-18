@@ -10,16 +10,27 @@ pub fn serialize(doc: &OrgDocument) -> String {
         out.push_str(&props.raw);
     }
 
-    // Metadata lines
-    for entry in &doc.metadata {
-        out.push_str(&entry.raw);
-        out.push('\n');
-    }
+    if doc.preamble_items.is_empty() {
+        // Metadata lines
+        for entry in &doc.metadata {
+            out.push_str(&entry.raw);
+            out.push('\n');
+        }
 
-    // Preamble
-    if !doc.preamble.is_empty() {
-        out.push_str(&doc.preamble);
-        if !doc.preamble.ends_with('\n') {
+        // Preamble
+        if !doc.preamble.is_empty() {
+            out.push_str(&doc.preamble);
+            if !doc.preamble.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+    } else {
+        // Metadata and text interleaved in their original order
+        for item in &doc.preamble_items {
+            match item {
+                PreambleItem::Metadata(entry) => out.push_str(&entry.raw),
+                PreambleItem::Text(text) => out.push_str(text),
+            }
             out.push('\n');
         }
     }
@@ -29,8 +40,16 @@ pub fn serialize(doc: &OrgDocument) -> String {
         serialize_section(&mut out, section);
     }
 
-    // Remove trailing extra newline if the input didn't have one
-    // (the caller should compare with original)
+    // Restore the original absence of a final newline
+    if !doc.final_newline && out.ends_with('\n') {
+        out.pop();
+    }
+
+    // Restore the original line ending style
+    if doc.line_ending == LineEnding::Crlf {
+        out = out.replace('\n', "\r\n");
+    }
+
     out
 }
 

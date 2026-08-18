@@ -12,10 +12,9 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
     schema::init_schema(conn).map_err(|e| SyncError::Database(e.to_string()))?;
     schema::init_fts(conn).map_err(|e| SyncError::Database(e.to_string()))?;
 
-    // Disable FK checks during sync — files are indexed one at a time, so links may
-    // reference nodes that haven't been indexed yet or were removed by git operations.
-    // We clean up orphaned links after sync completes.
-    conn.execute_batch("PRAGMA foreign_keys=OFF;")
+    // Foreign keys stay ON: index_file removes a file's child rows explicitly and
+    // only links from nodes that exist, so cascades and constraints both hold.
+    conn.execute_batch("PRAGMA foreign_keys=ON;")
         .map_err(|e| SyncError::Database(e.to_string()))?;
 
     let mut result = SyncResult::default();
@@ -42,8 +41,7 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
                 let path = entry.path().to_string_lossy().to_string();
                 let mtime = entry.metadata().ok()
                     .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs().to_string())
+                    .map(mtime_stamp)
                     .unwrap_or_default();
                 org_files.push((path, mtime));
             }
@@ -89,8 +87,9 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
                 .map_err(|e| SyncError::Database(e.to_string()))?;
 
             if hash_changed {
-                index::index_file(conn, file_path, &content)
+                let report = index::index_file_with_report(conn, file_path, &content)
                     .map_err(|e| SyncError::Database(e.to_string()))?;
+                result.id_collisions.extend(report.id_collisions);
                 result.indexed += 1;
             } else {
                 // Content same but mtime changed — update mtime in DB
@@ -128,11 +127,24 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
         [],
     ).map_err(|e| SyncError::Database(e.to_string()))?;
 
-    // Re-enable FK checks
-    conn.execute_batch("PRAGMA foreign_keys=ON;")
-        .map_err(|e| SyncError::Database(e.to_string()))?;
-
     Ok(result)
+}
+
+/// Format a modification time as the string stored in `files.mtime`.
+/// Millisecond precision, so an edit inside the same second as the last sync
+/// is still detected.
+pub fn mtime_stamp(time: std::time::SystemTime) -> String {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().to_string())
+        .unwrap_or_default()
+}
+
+/// Modification time of a file on disk, in the `files.mtime` format.
+pub fn file_mtime_stamp(file_path: &str) -> Option<String> {
+    std::fs::metadata(file_path)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(mtime_stamp)
 }
 
 /// Quick check: are there files on disk whose mtime doesn't match the DB?
@@ -153,8 +165,7 @@ pub fn has_changes(conn: &Connection, vault_path: &str) -> Result<bool, SyncErro
         let path = entry.path().to_string_lossy().to_string();
         let disk_mtime = entry.metadata().ok()
             .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs().to_string())
+            .map(mtime_stamp)
             .unwrap_or_default();
 
         match db_files.get(&path) {
@@ -194,6 +205,9 @@ pub struct SyncResult {
     /// Number of broken links found (source node no longer exists)
     #[serde(default)]
     pub broken_links: usize,
+    /// `:ID:` values declared by more than one file — last file indexed wins
+    #[serde(default)]
+    pub id_collisions: Vec<index::IdCollision>,
 }
 
 #[derive(Debug)]
@@ -248,5 +262,200 @@ mod tests {
 
         // has_changes should return false
         assert!(!has_changes(&conn, vault_path).unwrap());
+    }
+
+    fn count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+            .unwrap()
+    }
+
+    fn note(revision: usize) -> String {
+        format!(
+            r#":PROPERTIES:
+:ID: sync-file-id
+:ROAM_ALIASES: "Sync Alias"
+:END:
+#+TITLE: Revision {revision}
+#+FILETAGS: :alpha:beta:
+
+* Heading {revision}
+:PROPERTIES:
+:ID: sync-heading-id
+:END:
+Links [[id:target-one][one]] and [[id:target-two][two]].
+"#
+        )
+    }
+
+    #[test]
+    fn test_resync_changed_file_keeps_row_counts_stable() {
+        let dir = TempDir::new().unwrap();
+        let vault_path = dir.path().to_str().unwrap();
+        let file = dir.path().join("note.org");
+
+        fs::write(&file, note(1)).unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        sync_vault(&conn, vault_path).unwrap();
+
+        let baseline = (
+            count(&conn, "nodes"),
+            count(&conn, "tags"),
+            count(&conn, "links"),
+            count(&conn, "aliases"),
+            count(&conn, "headlines"),
+        );
+        assert!(baseline.1 > 0 && baseline.2 > 0 && baseline.3 > 0);
+
+        for revision in 2..=4 {
+            fs::write(&file, note(revision)).unwrap();
+            sync_vault(&conn, vault_path).unwrap();
+            let now = (
+                count(&conn, "nodes"),
+                count(&conn, "tags"),
+                count(&conn, "links"),
+                count(&conn, "aliases"),
+                count(&conn, "headlines"),
+            );
+            assert_eq!(now, baseline, "row counts drifted after re-sync {revision}");
+        }
+
+        // Foreign keys must still be enforced after sync
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
+    }
+
+    #[test]
+    fn test_sync_keeps_fts_consistent_after_title_edit() {
+        let dir = TempDir::new().unwrap();
+        let vault_path = dir.path().to_str().unwrap();
+        let file = dir.path().join("note.org");
+
+        fs::write(
+            &file,
+            ":PROPERTIES:\n:ID: title-id\n:END:\n#+TITLE: Antediluvian\n",
+        )
+        .unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        sync_vault(&conn, vault_path).unwrap();
+        assert!(!crate::query::search_nodes(&conn, "Antediluvian").unwrap().is_empty());
+
+        fs::write(
+            &file,
+            ":PROPERTIES:\n:ID: title-id\n:END:\n#+TITLE: Postdiluvian\n",
+        )
+        .unwrap();
+        sync_vault(&conn, vault_path).unwrap();
+
+        assert!(crate::query::search_nodes(&conn, "Antediluvian").unwrap().is_empty());
+        assert!(!crate::query::search_nodes(&conn, "Postdiluvian").unwrap().is_empty());
+        schema::check_fts_integrity(&conn).unwrap();
+    }
+
+    #[test]
+    fn test_sync_reports_duplicate_ids() {
+        let dir = TempDir::new().unwrap();
+        let vault_path = dir.path().to_str().unwrap();
+
+        fs::write(
+            dir.path().join("a.org"),
+            ":PROPERTIES:\n:ID: twin-id\n:END:\n#+TITLE: A\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("b.org"),
+            ":PROPERTIES:\n:ID: twin-id\n:END:\n#+TITLE: B\n",
+        )
+        .unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        let result = sync_vault(&conn, vault_path).unwrap();
+
+        assert_eq!(result.id_collisions.len(), 1);
+        assert_eq!(result.id_collisions[0].id, "twin-id");
+    }
+
+    #[test]
+    fn test_sync_detects_edit_within_same_second() {
+        let dir = TempDir::new().unwrap();
+        let vault_path = dir.path().to_str().unwrap();
+        let path = dir.path().join("note.org");
+
+        let base = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+
+        fs::write(&path, ":PROPERTIES:\n:ID: same-second\n:END:\n#+TITLE: One\n").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(base + std::time::Duration::from_millis(100))
+            .unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        sync_vault(&conn, vault_path).unwrap();
+
+        // Second edit lands in the same whole second as the first
+        fs::write(&path, ":PROPERTIES:\n:ID: same-second\n:END:\n#+TITLE: Two\n").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(base + std::time::Duration::from_millis(800))
+            .unwrap();
+
+        assert!(has_changes(&conn, vault_path).unwrap());
+        let result = sync_vault(&conn, vault_path).unwrap();
+        assert_eq!(result.indexed, 1);
+
+        let title: Option<String> = conn
+            .query_row("SELECT title FROM nodes WHERE id = 'same-second'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(title.as_deref(), Some("Two"));
+    }
+
+    #[test]
+    fn test_sync_skips_excluded_file_without_reparsing() {
+        let dir = TempDir::new().unwrap();
+        let vault_path = dir.path().to_str().unwrap();
+
+        fs::write(
+            dir.path().join("skip.org"),
+            "#+TITLE: Skip\n#+ROAM_EXCLUDE: t\n\n* Heading\n:PROPERTIES:\n:ID: skipped-id\n:END:\n",
+        )
+        .unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        let first = sync_vault(&conn, vault_path).unwrap();
+        assert_eq!(first.indexed, 1);
+
+        let second = sync_vault(&conn, vault_path).unwrap();
+        assert_eq!(second.indexed, 0);
+        assert_eq!(second.skipped, 1);
+        assert!(!has_changes(&conn, vault_path).unwrap());
+        assert_eq!(count(&conn, "nodes"), 0);
+    }
+
+    #[test]
+    fn test_sync_removes_rows_for_deleted_file() {
+        let dir = TempDir::new().unwrap();
+        let vault_path = dir.path().to_str().unwrap();
+        let path = dir.path().join("note.org");
+
+        fs::write(&path, note(1)).unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        sync_vault(&conn, vault_path).unwrap();
+        assert!(count(&conn, "tags") > 0);
+
+        fs::remove_file(&path).unwrap();
+        sync_vault(&conn, vault_path).unwrap();
+
+        assert_eq!(count(&conn, "files"), 0);
+        assert_eq!(count(&conn, "nodes"), 0);
+        assert_eq!(count(&conn, "tags"), 0);
+        assert_eq!(count(&conn, "aliases"), 0);
+        assert_eq!(count(&conn, "links"), 0);
+        assert_eq!(count(&conn, "headlines"), 0);
+        schema::check_fts_integrity(&conn).unwrap();
     }
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { vault } from '$lib/stores/vault.svelte';
-	import { createFile, listNodes, listFiles } from '$lib/tauri/commands';
+	import { createFile, listNodes, listFiles, localTimestamp } from '$lib/tauri/commands';
 
 	let {
 		open = false,
@@ -22,7 +22,7 @@
 		error = null;
 
 		try {
-			const filePath = await createFile(title.trim());
+			const filePath = await createFile(title.trim(), localTimestamp());
 
 			// Refresh vault data
 			const [files, nodes] = await Promise.all([listFiles(), listNodes()]);

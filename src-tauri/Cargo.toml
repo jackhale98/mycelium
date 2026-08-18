@@ -19,13 +19,14 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 org-parser = { path = "../crates/org-parser" }
 db = { path = "../crates/db" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
+sha2 = { workspace = true }
 rusqlite = { workspace = true }
 notify = "7"
 regex-lite = "0.1"

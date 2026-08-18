@@ -1,4 +1,4 @@
-import { Parser, NodeType, NodeSet, Tree, TreeFragment, NodeProp, type Input, type PartialParse } from '@lezer/common';
+import { Parser, NodeType, NodeSet, Tree, TreeFragment, NodeProp, type NodePropSource, type Input, type PartialParse } from '@lezer/common';
 import { styleTags, tags as t } from '@lezer/highlight';
 
 /// Node type IDs for our org grammar
@@ -133,12 +133,28 @@ interface BufferEntry {
 
 /// Line-by-line incremental parser for org-mode
 class OrgParser extends Parser {
+	private readonly nodes: NodeSet;
+
+	constructor(nodes: NodeSet = nodeSet) {
+		super();
+		this.nodes = nodes;
+	}
+
 	createParse(input: Input, fragments: readonly TreeFragment[], ranges: readonly { from: number; to: number }[]): PartialParse {
 		return new OrgPartialParse(input, this);
 	}
 
 	get nodeSet() {
-		return nodeSet;
+		return this.nodes;
+	}
+
+	/**
+	 * Attach node props (fold, indent, language data), the way `LRParser.configure`
+	 * does. `Parser` itself has none, so without this the org language module
+	 * throws on load and highlighting silently never activates.
+	 */
+	configure(config: { props?: readonly NodePropSource[] }): OrgParser {
+		return config.props ? new OrgParser(this.nodes.extend(...config.props)) : this;
 	}
 }
 
@@ -159,7 +175,7 @@ class OrgPartialParse implements PartialParse {
 			return this.buildTree(root, this.input.length);
 		} catch (e) {
 			console.warn('Org parser error, returning empty tree:', e);
-			return Tree.build({ buffer: [], nodeSet, topID: 1, length: this.input.length });
+			return Tree.build({ buffer: [], nodeSet: this.parser.nodeSet, topID: 1, length: this.input.length });
 		}
 	}
 
@@ -507,7 +523,7 @@ class OrgPartialParse implements PartialParse {
 		const buffer = this.flattenToBuffer(root);
 		return Tree.build({
 			buffer,
-			nodeSet,
+			nodeSet: this.parser.nodeSet,
 			topID: Type.Document,
 			length,
 		});

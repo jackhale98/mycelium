@@ -1,6 +1,23 @@
 import UIKit
 import WebKit
 
+/// Encode `value` as a JavaScript string literal (quotes included) so it can be
+/// interpolated into a script passed to `evaluateJavaScript` without breaking or
+/// injecting into it.
+private func jsString(_ value: String) -> String {
+    guard let data = try? JSONSerialization.data(withJSONObject: [value], options: []),
+          let json = String(data: data, encoding: .utf8),
+          json.count > 2 else {
+        return "\"\""
+    }
+    // Drop the array brackets JSONSerialization needs for a top-level value.
+    return String(json.dropFirst().dropLast())
+        .replacingOccurrences(of: "<", with: "\\u003C")
+        .replacingOccurrences(of: ">", with: "\\u003E")
+        .replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+        .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
+}
+
 /// Native iOS keyboard toolbar that sits above the software keyboard.
 /// Uses the inputAccessoryView mechanism — same approach as iA Writer, Bear, Blink.
 ///
@@ -156,12 +173,12 @@ class KeyboardToolbar: UIView {
                 })
                 for kw in todoKw {
                     alert.addAction(UIAlertAction(title: kw, style: .default) { _ in
-                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet('\(kw)')", completionHandler: nil)
+                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet(\(jsString(kw)))", completionHandler: nil)
                     })
                 }
                 for kw in doneKw {
                     alert.addAction(UIAlertAction(title: "✓ \(kw)", style: .default) { _ in
-                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet('\(kw)')", completionHandler: nil)
+                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.todoSet(\(jsString(kw)))", completionHandler: nil)
                     })
                 }
                 alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -212,7 +229,7 @@ class KeyboardToolbar: UIView {
                 })
                 for p in priorities {
                     alert.addAction(UIAlertAction(title: "[#\(p)]", style: .default) { _ in
-                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet('\(p)')", completionHandler: nil)
+                        self.webView?.evaluateJavaScript("window.__myceliumToolbar?.prioritySet(\(jsString(p)))", completionHandler: nil)
                     })
                 }
                 alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -278,7 +295,7 @@ class KeyboardToolbar: UIView {
                         let isActive = currentTags.contains(tag)
                         let title = isActive ? "✓ \(tag)" : "  \(tag)"
                         alert.addAction(UIAlertAction(title: title, style: .default) { _ in
-                            self.webView?.evaluateJavaScript("window.__myceliumToolbar?.tagSet('\(tag)')", completionHandler: nil)
+                            self.webView?.evaluateJavaScript("window.__myceliumToolbar?.tagSet(\(jsString(tag)))", completionHandler: nil)
                         })
                     }
 
@@ -287,7 +304,7 @@ class KeyboardToolbar: UIView {
                         input.addTextField { $0.placeholder = "tag name" }
                         input.addAction(UIAlertAction(title: "Add", style: .default) { _ in
                             if let tag = input.textFields?.first?.text?.trimmingCharacters(in: .whitespaces), !tag.isEmpty {
-                                self.webView?.evaluateJavaScript("window.__myceliumToolbar?.tagSet('\(tag)')", completionHandler: nil)
+                                self.webView?.evaluateJavaScript("window.__myceliumToolbar?.tagSet(\(jsString(tag)))", completionHandler: nil)
                             }
                         })
                         input.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -308,7 +325,7 @@ class KeyboardToolbar: UIView {
 
     private func showDatePicker(for type: String, from sender: UIButton) {
         // Fetch existing date from JS so we can pre-select it
-        let jsGet = "window.__myceliumToolbar?.getExisting?.('\(type)') ?? ''"
+        let jsGet = "window.__myceliumToolbar?.getExisting?.(\(jsString(type))) ?? ''"
         webView?.evaluateJavaScript(jsGet) { [weak self] result, _ in
             guard let self = self else { return }
             let existingStr = result as? String ?? ""
@@ -335,7 +352,7 @@ class KeyboardToolbar: UIView {
                     let dayStr = dayFormatter.string(from: date)
                     let timestamp = "<\(dateStr) \(dayStr)>"
                     let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"
-                    self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)('\(timestamp)')", completionHandler: nil)
+                    self?.webView?.evaluateJavaScript("window.__myceliumToolbar?.\(jsType)(\(jsString(timestamp)))", completionHandler: nil)
                 }
                 vc.onRemove = { [weak self] in
                     let jsType = type == "deadline" ? "deadlineSet" : "scheduledSet"

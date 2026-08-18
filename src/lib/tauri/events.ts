@@ -3,7 +3,15 @@ import { listFiles, listNodes } from './commands';
 
 type UnlistenFn = () => void;
 
-export async function onDbUpdated(callback?: () => void): Promise<UnlistenFn> {
+/**
+ * Refresh the vault lists whenever the backend reports a database change.
+ * `onError` receives the failure message when the refresh itself fails, so the
+ * page can tell the user its lists are stale instead of showing nothing.
+ */
+export async function onDbUpdated(
+	callback?: () => void,
+	onError?: (message: string) => void
+): Promise<UnlistenFn> {
 	try {
 		const { listen } = await import('@tauri-apps/api/event');
 		return listen('db-updated', async () => {
@@ -11,22 +19,14 @@ export async function onDbUpdated(callback?: () => void): Promise<UnlistenFn> {
 				const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
 				vault.updateFiles(files);
 				vault.updateNodes(nodes);
-			} catch {
-				// Vault may have been closed
+			} catch (e) {
+				if (vault.isOpen) onError?.(String(e));
 			}
 			callback?.();
 		});
-	} catch {
+	} catch (e) {
 		// Not running in Tauri — return no-op unlisten
-		return () => {};
-	}
-}
-
-export async function onVaultChanged(callback: () => void): Promise<UnlistenFn> {
-	try {
-		const { listen } = await import('@tauri-apps/api/event');
-		return listen('vault-changed', () => callback());
-	} catch {
+		console.warn('[Mycelium] db-updated listener unavailable:', e);
 		return () => {};
 	}
 }

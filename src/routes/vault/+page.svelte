@@ -3,13 +3,14 @@
 	import { vault } from '$lib/stores/vault.svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { syncVault, checkVaultChanges, getAllTags, getNodesByTag, listFiles, listNodes } from '$lib/tauri/commands';
-	import type { NodeRecord } from '$lib/types/node';
+	import { openVaultAt, savedVaultPath } from '$lib/vault/open';
 	import { onDbUpdated } from '$lib/tauri/events';
 	import { theme } from '$lib/stores/theme.svelte';
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import CreateNodeModal from '$lib/components/common/CreateNodeModal.svelte';
 	import QuickCapture from '$lib/components/common/QuickCapture.svelte';
 	import type { TagCount } from '$lib/types/node';
+	import type { IdCollision } from '$lib/types/vault';
 
 	let showCreateModal = $state(false);
 	let search = $state('');
@@ -17,6 +18,21 @@
 	let selectedTag = $state<string | null>(null);
 	let showTagDropdown = $state(false);
 	let tagNodeIds = $state<Set<string>>(new Set());
+	let statusError = $state<string | null>(null);
+	let isRestoring = $state(false);
+	let restoreError = $state<string | null>(null);
+	let idWarning = $state<string | null>(collisionWarning(vault.lastSync?.id_collisions ?? []));
+
+	/** Two files declaring one `:ID:` collapse into a single node, so name them and say what to do. */
+	function collisionWarning(collisions: IdCollision[]): string | null {
+		if (collisions.length === 0) return null;
+		const first = collisions[0];
+		const a = first.existing_file.split('/').pop() ?? first.existing_file;
+		const b = first.new_file.split('/').pop() ?? first.new_file;
+		const extra = collisions.length - 1;
+		const rest = extra > 0 ? ` ${extra} other ID${extra === 1 ? ' is' : 's are'} shared too.` : '';
+		return `${a} and ${b} both use the ID ${first.id}, so only one of them is showing. org-roam needs every ID to be unique — open one and give it a new :ID:.${rest}`;
+	}
 
 	const filteredNodes = $derived(
 		vault.nodes.filter(n => {
@@ -33,35 +49,77 @@
 			try {
 				const nodes = await getNodesByTag(tag);
 				tagNodeIds = new Set(nodes.map(n => n.id));
-			} catch { tagNodeIds = new Set(); }
+				statusError = null;
+			} catch (e) {
+				tagNodeIds = new Set();
+				selectedTag = null;
+				statusError = `Could not filter by #${tag}: ${e}`;
+			}
 		} else {
 			tagNodeIds = new Set();
 		}
 	}
 
+	/** The vault store lives in sessionStorage, which mobile webviews drop; reopen instead of bouncing to the picker. */
+	async function restoreVault(path: string) {
+		isRestoring = true;
+		restoreError = null;
+		try {
+			const { sync, keywordError } = await openVaultAt(path);
+			idWarning = collisionWarning(sync.id_collisions ?? []);
+			if (keywordError) {
+				statusError = `Custom TODO keywords could not be applied (${keywordError}). Rebuild the database from Settings.`;
+			}
+			await loadTags();
+		} catch (e) {
+			restoreError = String(e);
+		} finally {
+			isRestoring = false;
+		}
+	}
+
+	async function loadTags() {
+		try {
+			tags = await getAllTags();
+		} catch (e) {
+			statusError = `Could not load tags: ${e}`;
+		}
+	}
+
+	async function handleFocus() {
+		try {
+			const changed = await checkVaultChanges();
+			if (changed) {
+				const result = await syncVault();
+				idWarning = collisionWarning(result.id_collisions ?? []) ?? idWarning;
+				if (result.indexed > 0 || result.removed > 0) {
+					const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
+					vault.updateFiles(files);
+					vault.updateNodes(nodes);
+				}
+			}
+			statusError = null;
+		} catch (e) {
+			statusError = `Background sync failed — this list may be out of date: ${e}`;
+		}
+	}
+
 	onMount(() => {
 		if (!vault.isOpen) {
-			window.location.href = '/';
-			return;
+			const saved = savedVaultPath();
+			if (!saved) {
+				window.location.href = '/';
+				return;
+			}
+			restoreVault(saved);
+		} else {
+			loadTags();
 		}
-		const unlistenPromise = onDbUpdated();
-		async function handleFocus() {
-			try {
-				const changed = await checkVaultChanges();
-				if (changed) {
-					const result = await syncVault();
-					if (result.indexed > 0 || result.removed > 0) {
-						const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
-						vault.updateFiles(files);
-						vault.updateNodes(nodes);
-					}
-				}
-			} catch {}
-		}
-		window.addEventListener('focus', handleFocus);
 
-		// Load tags
-		getAllTags().then(t => { tags = t; }).catch(() => {});
+		const unlistenPromise = onDbUpdated(undefined, (message) => {
+			statusError = `Could not refresh the node list: ${message}`;
+		});
+		window.addEventListener('focus', handleFocus);
 
 		return () => {
 			unlistenPromise.then((unlisten) => unlisten());
@@ -98,6 +156,24 @@
 			</svg>
 		</a>
 	</header>
+
+	{#if statusError}
+		<div class="flex shrink-0 items-start gap-2 border-b border-red-200 bg-red-50 px-4 py-2 dark:border-red-900 dark:bg-red-950">
+			<p class="flex-1 text-xs text-red-600 dark:text-red-400">{statusError}</p>
+			<button onclick={() => (statusError = null)} class="shrink-0 rounded p-0.5 text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900" aria-label="Dismiss">
+				<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+			</button>
+		</div>
+	{/if}
+
+	{#if idWarning}
+		<div class="flex shrink-0 items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 dark:border-amber-900 dark:bg-amber-950">
+			<p class="flex-1 text-xs text-amber-800 dark:text-amber-300">{idWarning}</p>
+			<button onclick={() => (idWarning = null)} class="shrink-0 rounded p-0.5 text-amber-800 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900" aria-label="Dismiss">
+				<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+			</button>
+		</div>
+	{/if}
 
 	<!-- Search + Tag filter bar -->
 	<div class="shrink-0 border-b border-surface-200 px-4 py-2 dark:border-surface-700">

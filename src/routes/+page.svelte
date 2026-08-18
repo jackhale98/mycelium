@@ -1,52 +1,43 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { vault } from '$lib/stores/vault.svelte';
-	import { openVault, listFiles, listNodes, setTodoKeywords } from '$lib/tauri/commands';
-	import { orgConfig } from '$lib/stores/orgconfig.svelte';
+	import { isAndroid, isMobile, openVaultAt, savedVaultPath } from '$lib/vault/open';
 	import FolderBrowser from '$lib/components/common/FolderBrowser.svelte';
+	import type { IdCollision } from '$lib/types/vault';
 
 	let vaultPath = $state('');
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
+	let warning = $state<string | null>(null);
 	let autoOpening = $state(false);
 	let showFolderBrowser = $state(false);
 
 	onMount(() => {
 		// Check for saved vault path and auto-open
-		const saved = localStorage.getItem('mycelium-vault-path');
+		const saved = savedVaultPath();
 		if (saved && !vault.isOpen) {
 			vaultPath = saved;
 			autoOpen(saved);
 		}
 	});
 
-	/** Restore iOS security-scoped bookmark access before opening vault */
-	async function restoreIOSAccess(): Promise<void> {
-		if (!isMobile()) return;
-		try {
-			const { invoke } = await import('@tauri-apps/api/core');
-			const result = await invoke<{ path: string | null }>('plugin:folder-picker|restore_access');
-			console.log('[Mycelium] Restored iOS access:', result?.path);
-		} catch (e) {
-			console.warn('[Mycelium] restore_access failed (non-fatal):', e);
-		}
-	}
-
 	async function autoOpen(path: string) {
 		autoOpening = true;
+		error = null;
 		try {
-			// On iOS, restore security-scoped bookmark access before syncing
-			await restoreIOSAccess();
-			// Push user's custom TODO keywords to the parser before sync runs
-			await setTodoKeywords(orgConfig.allKeywords).catch(() => {});
-			const syncResult = await openVault(path);
-			const files = await listFiles();
-			const nodes = await listNodes();
-			vault.setVault(path, files, nodes, syncResult);
-			localStorage.setItem('mycelium-vault-path', path);
-			window.location.href = '/vault';
-		} catch {
-			// Saved path no longer valid — show the picker
+			const { sync, keywordError } = await openVaultAt(path);
+			if (sync.id_collisions?.length) {
+				console.warn('[Mycelium] Duplicate :ID: values found during sync:', sync.id_collisions);
+			}
+			if (keywordError) {
+				warning = keywordSyncWarning(keywordError);
+				autoOpening = false;
+				return;
+			}
+			continueToVault();
+		} catch (e) {
+			// Saved path no longer valid — show the picker, and say why
+			error = `Could not reopen ${path}: ${e}`;
 			autoOpening = false;
 		}
 	}
@@ -55,33 +46,39 @@
 		if (!vaultPath.trim()) return;
 		isLoading = true;
 		error = null;
+		warning = null;
 		try {
-			// Restore iOS security-scoped access before syncing
-			await restoreIOSAccess();
-			// Push user's custom TODO keywords to the parser before sync runs
-			await setTodoKeywords(orgConfig.allKeywords).catch(() => {});
-			const syncResult = await openVault(vaultPath.trim());
-			const files = await listFiles();
-			const nodes = await listNodes();
+			const path = vaultPath.trim();
+			const { sync, keywordError } = await openVaultAt(path);
 
 			// Check if we actually indexed any files
-			if (syncResult.total_files === 0 && isMobile()) {
+			if (sync.total_files === 0 && isMobile()) {
 				error = 'No .org files found. On iOS, the app may not have access to this folder. Try placing your vault in the Mycelium Documents folder (accessible via Files app → On My iPhone → Mycelium).';
 				isLoading = false;
 				return;
 			}
 
 			// Surface any walk errors for debugging
-			if (syncResult.walk_errors?.length > 0) {
-				console.warn('[Mycelium] Walk errors during sync:', syncResult.walk_errors);
+			if ((sync.walk_errors?.length ?? 0) > 0) {
+				console.warn('[Mycelium] Walk errors during sync:', sync.walk_errors);
 			}
-			if (syncResult.broken_links && syncResult.broken_links > 0) {
-				console.warn(`[Mycelium] ${syncResult.broken_links} broken link(s) removed (source node no longer exists)`);
+			if (sync.broken_links && sync.broken_links > 0) {
+				console.warn(`[Mycelium] ${sync.broken_links} broken link(s) removed (source node no longer exists)`);
 			}
 
-			vault.setVault(vaultPath.trim(), files, nodes, syncResult);
-			localStorage.setItem('mycelium-vault-path', vaultPath.trim());
-			window.location.href = '/vault';
+			const collisions = sync.id_collisions ?? [];
+			if (collisions.length > 0) {
+				console.warn('[Mycelium] Duplicate :ID: values found during sync:', collisions);
+			}
+
+			const warnings: string[] = [];
+			if (keywordError) warnings.push(keywordSyncWarning(keywordError));
+			if (collisions.length > 0) warnings.push(idCollisionWarning(collisions));
+			if (warnings.length > 0) {
+				warning = warnings.join('\n\n');
+				return;
+			}
+			continueToVault();
 		} catch (e) {
 			error = String(e);
 		} finally {
@@ -89,9 +86,21 @@
 		}
 	}
 
-	function isMobile(): boolean {
-		if (typeof navigator === 'undefined') return false;
-		return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+	function continueToVault() {
+		window.location.href = '/vault';
+	}
+
+	function keywordSyncWarning(detail: string): string {
+		return `Your custom TODO keywords could not be applied before indexing (${detail}). Rebuild the database from Settings once the app is working.`;
+	}
+
+	function idCollisionWarning(collisions: IdCollision[]): string {
+		const first = collisions[0];
+		const a = first.existing_file.split('/').pop() ?? first.existing_file;
+		const b = first.new_file.split('/').pop() ?? first.new_file;
+		const extra = collisions.length - 1;
+		const rest = extra > 0 ? ` ${extra} other ID${extra === 1 ? ' is' : 's are'} shared too.` : '';
+		return `${a} and ${b} both use the ID ${first.id}, so only one of them is showing. org-roam needs every ID to be unique — open one and give it a new :ID:.${rest}`;
 	}
 
 	async function handlePickFolder() {
@@ -107,6 +116,16 @@
 				}
 			} catch (e) {
 				console.warn('Folder picker plugin failed:', e);
+			}
+
+			// Android has no folder picker yet: the file dialog returns a content://
+			// URI that the indexer cannot read, so say so instead of failing later
+			// with a confusing error.
+			if (isAndroid()) {
+				error =
+					'Choosing a vault folder is not supported on Android yet. Type the full path to your vault below, or browse for it.';
+				showFolderBrowser = true;
+				return;
 			}
 
 			// Fallback: file picker (limited to single file access)
@@ -188,6 +207,18 @@
 					<p class="rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-950 dark:text-red-400">
 						{error}
 					</p>
+				{/if}
+
+				{#if warning}
+					<div class="rounded-lg bg-amber-50 p-3 dark:bg-amber-950">
+						<p class="whitespace-pre-line text-sm text-amber-800 dark:text-amber-300">{warning}</p>
+						<button
+							onclick={continueToVault}
+							class="mt-2 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-900"
+						>
+							Continue to vault
+						</button>
+					</div>
 				{/if}
 			</div>
 
