@@ -110,8 +110,17 @@ jobs:
           # Link them explicitly; unreferenced ones cost nothing.
           SWIFT_LIB="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphoneos"
           ls "$SWIFT_LIB"/libswiftCompatibility*.a
-          export OTHER_LDFLAGS="\$(inherited) -L$SWIFT_LIB -lswiftCompatibility50 -lswiftCompatibility51 -lswiftCompatibility56 -lswiftCompatibilityConcurrency -lswiftCompatibilityDynamicReplacements"
-          echo "OTHER_LDFLAGS=$OTHER_LDFLAGS"
+
+          # xcodebuild ignores a bare OTHER_LDFLAGS in the environment, so the
+          # flags go in via an xcconfig, which it does honour and which tauri
+          # passes through when it invokes xcodebuild.
+          XCCONFIG="$RUNNER_TEMP/swift-compat.xcconfig"
+          {
+            echo "OTHER_LDFLAGS = \$(inherited) -L$SWIFT_LIB -lswiftCompatibility50 -lswiftCompatibility51 -lswiftCompatibility56 -lswiftCompatibilityConcurrency -lswiftCompatibilityDynamicReplacements"
+          } > "$XCCONFIG"
+          cat "$XCCONFIG"
+          export XCODE_XCCONFIG_FILE="$XCCONFIG"
+
           npx tauri ios build --export-method app-store-connect
 
       - name: Find IPA
