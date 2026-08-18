@@ -103,7 +103,16 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APPLE_API_KEY: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APPLE_API_KEY_PATH: ${{ env.API_KEY_PATH }}
-        run: npx tauri ios build --export-method app-store-connect
+        run: |
+          # Xcode 26 stopped auto-linking the Swift back-deployment archives, but
+          # still ships them, and every Swift object compiled into libapp.a by
+          # swift-rs force-loads swiftCompatibility56 (tauri-apps/tauri#15066).
+          # Link them explicitly; unreferenced ones cost nothing.
+          SWIFT_LIB="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphoneos"
+          ls "$SWIFT_LIB"/libswiftCompatibility*.a
+          export OTHER_LDFLAGS="\$(inherited) -L$SWIFT_LIB -lswiftCompatibility50 -lswiftCompatibility51 -lswiftCompatibility56 -lswiftCompatibilityConcurrency -lswiftCompatibilityDynamicReplacements"
+          echo "OTHER_LDFLAGS=$OTHER_LDFLAGS"
+          npx tauri ios build --export-method app-store-connect
 
       - name: Find IPA
         id: find-ipa
