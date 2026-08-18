@@ -79,6 +79,58 @@ jobs:
             echo "Patched Info.plist"
           fi
 
+      - name: Link Swift back-deployment archives
+        run: |
+          # Xcode 26 stopped auto-linking these, but still ships them, while the
+          # Swift objects swift-rs compiles into libapp.a force-load
+          # swiftCompatibility56 (tauri-apps/tauri#15066). Neither OTHER_LDFLAGS
+          # in the environment nor XCODE_XCCONFIG_FILE reaches the link, so the
+          # setting goes straight into the generated project.
+          SWIFT_LIB="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphoneos"
+          ls "$SWIFT_LIB"/libswiftCompatibility*.a
+          PBX=$(find src-tauri/gen/apple -name project.pbxproj | head -1)
+          echo "patching $PBX"
+          python3 - "$PBX" "$SWIFT_LIB" <<'PYEOF'
+          import re, sys
+
+          path, libdir = sys.argv[1], sys.argv[2]
+          libs = " ".join(
+              f"-l{name}"
+              for name in (
+                  "swiftCompatibility50",
+                  "swiftCompatibility51",
+                  "swiftCompatibility56",
+                  "swiftCompatibilityConcurrency",
+                  "swiftCompatibilityDynamicReplacements",
+              )
+          )
+          added = f"-L{libdir} {libs}"
+          src = open(path).read()
+
+          def extend(m):
+              value = m.group(1).strip()
+              if value.startswith("("):
+                  entries = " ".join(f'"{lib}",' for lib in added.split())
+                  return m.group(0).replace(")", f"{entries}\n\t\t\t\t)", 1)
+              inner = value[1:-1] if value.startswith('"') else value
+              return f'OTHER_LDFLAGS = "{inner} {added}";'
+
+          def patch(match):
+              block = match.group(0)
+              if "OTHER_LDFLAGS" in block:
+                  return re.sub(r"OTHER_LDFLAGS = ([^;]+);", extend, block)
+              return block.replace(
+                  "buildSettings = {",
+                  f'buildSettings = {{\n\t\t\t\tOTHER_LDFLAGS = "$(inherited) {added}";',
+                  1,
+              )
+
+          out, count = re.subn(r"buildSettings = \{.*?\n\t*\};", patch, src, flags=re.S)
+          open(path, "w").write(out)
+          print(f"patched {count} buildSettings blocks")
+          PYEOF
+          grep -c "lswiftCompatibility56" "$PBX" || { echo "::error::flags not written"; exit 1; }
+
       - name: Prepare App Store Connect API key
         env:
           API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
@@ -108,19 +160,6 @@ jobs:
           # still ships them, and every Swift object compiled into libapp.a by
           # swift-rs force-loads swiftCompatibility56 (tauri-apps/tauri#15066).
           # Link them explicitly; unreferenced ones cost nothing.
-          SWIFT_LIB="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphoneos"
-          ls "$SWIFT_LIB"/libswiftCompatibility*.a
-
-          # xcodebuild ignores a bare OTHER_LDFLAGS in the environment, so the
-          # flags go in via an xcconfig, which it does honour and which tauri
-          # passes through when it invokes xcodebuild.
-          XCCONFIG="$RUNNER_TEMP/swift-compat.xcconfig"
-          {
-            echo "OTHER_LDFLAGS = \$(inherited) -L$SWIFT_LIB -lswiftCompatibility50 -lswiftCompatibility51 -lswiftCompatibility56 -lswiftCompatibilityConcurrency -lswiftCompatibilityDynamicReplacements"
-          } > "$XCCONFIG"
-          cat "$XCCONFIG"
-          export XCODE_XCCONFIG_FILE="$XCCONFIG"
-
           npx tauri ios build --export-method app-store-connect
 
       - name: Find IPA
