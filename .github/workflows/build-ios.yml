@@ -92,6 +92,10 @@ jobs:
 
       - name: Build iOS release
         env:
+          # swift-rs compiles the Swift sources into libapp.a through cargo, not
+          # Xcode, so it needs the deployment target too — below 15.4 it emits a
+          # force-load of the Swift 5.6 shim that Xcode 26 no longer ships.
+          IPHONEOS_DEPLOYMENT_TARGET: "15.4"
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
           IOS_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
