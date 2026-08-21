@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { vault } from '$lib/stores/vault.svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
-	import { syncVault, checkVaultChanges, getAllTags, getNodesByTag, listFiles, listNodes } from '$lib/tauri/commands';
+	import { getAllTags, getNodesByTag } from '$lib/tauri/commands';
+	import { resyncIfChanged } from '$lib/vault/resync';
 	import { openVaultAt, savedVaultPath } from '$lib/vault/open';
 	import { onDbUpdated } from '$lib/tauri/events';
 	import { theme } from '$lib/stores/theme.svelte';
@@ -88,16 +89,10 @@
 
 	async function handleFocus() {
 		try {
-			const changed = await checkVaultChanges();
-			if (changed) {
-				const result = await syncVault();
-				idWarning = collisionWarning(result.id_collisions ?? []) ?? idWarning;
-				if (result.indexed > 0 || result.removed > 0) {
-					const [files, nodes] = await Promise.all([listFiles(), listNodes()]);
-					vault.updateFiles(files);
-					vault.updateNodes(nodes);
-				}
-			}
+			// Shared with the layout's foreground re-sync, so returning to the app
+			// on this page runs one sync rather than two.
+			const result = await resyncIfChanged();
+			if (result) idWarning = collisionWarning(result.id_collisions ?? []) ?? idWarning;
 			statusError = null;
 		} catch (e) {
 			statusError = `Background sync failed — this list may be out of date: ${e}`;

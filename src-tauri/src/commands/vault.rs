@@ -1,8 +1,10 @@
+use crate::fsutil;
 use crate::state::AppState;
 use crate::watcher;
 use db::sync;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Open a vault directory, initialize the database, sync, and start file watcher
 #[tauri::command]
@@ -15,6 +17,14 @@ pub async fn open_vault(
 
     if !vault_path.is_dir() {
         return Err(format!("Not a directory: {path}"));
+    }
+
+    // Clear temp files an interrupted write left behind before indexing, so they
+    // never reach the user's git status. An hour is far longer than any write
+    // takes, so a write in flight is never disturbed.
+    let swept = fsutil::sweep_stale_temp_files(&vault_path, Duration::from_secs(3600));
+    if swept > 0 {
+        eprintln!("Removed {swept} leftover temp file(s) from a previous run");
     }
 
     // Open database
@@ -48,11 +58,23 @@ pub async fn list_files(state: State<'_, AppState>) -> Result<Vec<db::FileRecord
 
 /// Re-sync the vault (scan for changes). Used for mobile re-scan on focus.
 #[tauri::command]
-pub async fn sync_vault(state: State<'_, AppState>) -> Result<sync::SyncResult, String> {
+pub async fn sync_vault(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<sync::SyncResult, String> {
     let vault_path = state.vault_path()?;
     let path_str = vault_path.to_string_lossy().to_string();
 
-    state.with_db(|conn| sync::sync_vault(conn, &path_str).map_err(|e| e.to_string()))
+    let result =
+        state.with_db(|conn| sync::sync_vault(conn, &path_str).map_err(|e| e.to_string()))?;
+
+    // Views listen for this; without it a sync triggered on resume updates the
+    // database while every open screen keeps showing what it read before.
+    if result.indexed > 0 || result.removed > 0 {
+        let _ = app.emit("db-updated", ());
+    }
+
+    Ok(result)
 }
 
 /// Check if the vault has changes (fast mtime comparison, no file reads).
@@ -82,8 +104,6 @@ pub async fn rebuild_database(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<sync::SyncResult, String> {
-    use tauri::Emitter;
-
     let vault_path = state.vault_path()?;
     let path_str = vault_path.to_string_lossy().to_string();
 

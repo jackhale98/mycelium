@@ -4,6 +4,7 @@
 	import type { Snippet } from 'svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
+	import { resyncIfChanged } from '$lib/vault/resync';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -23,7 +24,22 @@
 		// Install native keyboard toolbar (iOS + Android)
 		setupNativeToolbar();
 
+		// Pick up edits made while the app was in the background — a git client
+		// syncing the folder, another device, a desktop Emacs. `visibilitychange`
+		// is the signal iOS actually delivers when returning from another app;
+		// `focus` covers desktop window switching, and the two de-duplicate.
+		const onForeground = () => {
+			if (document.visibilityState !== 'visible') return;
+			resyncIfChanged().catch((e) => {
+				console.warn('[Mycelium] background re-sync failed:', e);
+			});
+		};
+		document.addEventListener('visibilitychange', onForeground);
+		window.addEventListener('focus', onForeground);
+
 		return () => {
+			document.removeEventListener('visibilitychange', onForeground);
+			window.removeEventListener('focus', onForeground);
 			mq.removeEventListener('change', handler);
 			delete (window as any).__myceliumOrgConfig;
 			delete (window as any).__myceliumVaultTags;

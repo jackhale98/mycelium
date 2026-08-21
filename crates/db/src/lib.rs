@@ -9,6 +9,7 @@ pub use query::{
     HeadlineRecord, NodeRecord, SearchResult, TagCount,
 };
 pub use schema::{check_fts_integrity, rebuild_fts, repair_fts, reset_database};
+pub use sync::{is_ignored_dir, IGNORED_DIRS};
 pub use sync::{SyncError, SyncResult};
 
 use rusqlite::Connection;

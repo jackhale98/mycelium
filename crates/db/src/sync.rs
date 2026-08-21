@@ -2,7 +2,44 @@ use crate::{index, schema};
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
+
+/// Directory names never descended into when scanning a vault.
+///
+/// `.git` is the important one: a vault managed by a git client (Working Copy
+/// on iOS, say) carries thousands of files under it that are re-stat'd on every
+/// scan and, worse, are handed to the file watcher — which on iOS needs one
+/// open descriptor per watched path and hits the process limit long before it
+/// finishes. None of these directories hold notes the user authored.
+///
+/// `.stversions` earns its place for a second reason: Syncthing fills it with
+/// older copies of real notes, and indexing those would register duplicate
+/// org-roam IDs against files the user cannot see.
+pub const IGNORED_DIRS: &[&str] = &[
+    ".git",         // git
+    ".hg",          // mercurial
+    ".svn",         // subversion
+    ".jj",          // jujutsu
+    ".stversions",  // syncthing version history
+    ".stfolder",    // syncthing marker
+    ".trash",
+    ".Trash",
+    "node_modules",
+];
+
+/// `true` when a directory of this name should not be descended into.
+pub fn is_ignored_dir(name: &str) -> bool {
+    IGNORED_DIRS.contains(&name)
+}
+
+/// `true` unless the entry is a directory on the ignore list. The root is
+/// always kept, so a vault that *is* `.git` still scans (the user's choice).
+fn keep_entry(entry: &DirEntry) -> bool {
+    if entry.depth() == 0 || !entry.file_type().is_dir() {
+        return true;
+    }
+    !is_ignored_dir(&entry.file_name().to_string_lossy())
+}
 
 /// Sync a vault directory with the database.
 /// Uses filesystem mtime to detect changes cheaply — only reads and re-indexes
@@ -22,7 +59,11 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
     // Walk the vault directory for .org files, collecting path + mtime
     // follow_links(true) ensures symlinks are followed (common in synced vaults)
     let mut org_files: Vec<(String, String)> = Vec::new();
-    for entry_result in WalkDir::new(vault_path).follow_links(true).into_iter() {
+    for entry_result in WalkDir::new(vault_path)
+        .follow_links(true)
+        .into_iter()
+        .filter_entry(keep_entry)
+    {
         match entry_result {
             Err(err) => {
                 let msg = format!("walkdir: {}", err);
@@ -158,7 +199,11 @@ pub fn has_changes(conn: &Connection, vault_path: &str) -> Result<bool, SyncErro
         .filter_map(|r| r.ok())
         .collect();
 
-    for entry in WalkDir::new(vault_path).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(vault_path)
+        .into_iter()
+        .filter_entry(keep_entry)
+        .filter_map(|e| e.ok())
+    {
         if !entry.file_type().is_file() { continue; }
         if entry.path().extension().map(|e| e != "org").unwrap_or(true) { continue; }
 
@@ -229,6 +274,49 @@ impl std::error::Error for SyncError {}
 
 #[cfg(test)]
 mod tests {
+
+    /// A vault managed by a git client carries a `.git` far larger than the notes
+    /// beside it. Descending into it costs a full stat sweep per sync and, on iOS,
+    /// hands the watcher more paths than it has descriptors for.
+    #[test]
+    fn walk_skips_vcs_and_sync_directories() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".git/objects/ab")).unwrap();
+        std::fs::create_dir_all(root.join(".stversions")).unwrap();
+        std::fs::create_dir_all(root.join("daily")).unwrap();
+        std::fs::write(root.join("inbox.org"), "* TODO note").unwrap();
+        std::fs::write(root.join("daily/2026-08-21.org"), "* TODO today").unwrap();
+        std::fs::write(root.join(".git/objects/ab/cafe.org"), "* decoy").unwrap();
+        // Syncthing keeps older copies of real notes here; indexing them would
+        // register duplicate org-roam IDs against files the user cannot see.
+        std::fs::write(root.join(".stversions/inbox.org"), "* stale copy").unwrap();
+
+        let mut found: Vec<String> = WalkDir::new(root)
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(keep_entry)
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_type().is_file()
+                    && e.path().extension().map(|x| x == "org").unwrap_or(false)
+            })
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        found.sort();
+
+        assert_eq!(found, vec!["2026-08-21.org", "inbox.org"]);
+    }
+
+    #[test]
+    fn ignored_dirs_cover_the_common_vcs_and_sync_metadata() {
+        for name in [".git", ".hg", ".svn", ".jj", ".stversions", "node_modules"] {
+            assert!(is_ignored_dir(name), "{name} should be skipped");
+        }
+        for name in ["daily", "notes", ".config-notes", "git"] {
+            assert!(!is_ignored_dir(name), "{name} should be indexed");
+        }
+    }
     use super::*;
     use std::fs;
     use tempfile::TempDir;

@@ -178,6 +178,37 @@ mycelium/
 └── LICENSE                  # Apache 2.0
 ```
 
+## Using a git-managed vault
+
+Mycelium works on a vault that is a git repository — including one managed from
+iOS by Working Copy, which exposes its checkouts through the Files app.
+
+What the app does to your working tree:
+
+- **Notes are written whole and verbatim.** No line-ending translation, no
+  trailing-newline fixups, no reformatting on save, so diffs stay small.
+- **Writes are atomic** (temp file, fsync, rename) and carry the target's
+  existing permission bits, so you never see spurious mode changes.
+- **The index lives outside the vault**, in the platform app-data directory. No
+  database or lock file lands in your repo.
+- **`.git` is never scanned or watched.** Version-control and sync metadata
+  (`.git`, `.hg`, `.svn`, `.jj`, `.stversions`, `.stfolder`, `node_modules`) are
+  skipped when indexing and excluded from the file watcher.
+- **Outside edits are picked up when the app returns to the foreground.** Pull in
+  your git client, switch back, and the vault re-indexes.
+- **Concurrent edits are detected, not overwritten.** If a file changed on disk
+  since you opened it, saving raises a conflict and offers you both versions.
+
+### Recommended `.gitignore`
+
+Interrupted writes can leave a temp file behind — the app clears stale ones when
+it opens a vault, but git does not ignore dotfiles, so add:
+
+```gitignore
+# Mycelium: temp files from an interrupted write
+.*.[0-9a-f][0-9a-f]*.tmp
+```
+
 ## Database Schema
 
 Mycelium uses an org-roam v2 compatible SQLite schema:
