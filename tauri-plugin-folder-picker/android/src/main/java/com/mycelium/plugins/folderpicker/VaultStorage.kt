@@ -229,7 +229,8 @@ class VaultStorage(private val context: Context) {
 
     private fun writeDirect(path: String, parentId: String, name: String, bytes: ByteArray) {
         val existing = resolveDocument(path)?.let { documentUri(it) }
-        val target = existing ?: createDocument(parentId, name)
+        val target = existing
+            ?: createDocument(parentId, name)
             ?: throw FileNotFoundException("could not create $path")
         writeBytes(target, bytes)
         documentIds[path] = DocumentsContract.getDocumentId(target)
@@ -273,9 +274,11 @@ class VaultStorage(private val context: Context) {
                 currentId = cached
                 continue
             }
-            val found = findChild(currentId, segment, wantDirectory = true)
-                ?: if (create) createDirectory(currentId, segment) else null
-                ?: return null
+            var found = findChild(currentId, segment, wantDirectory = true)
+            if (found == null && create) {
+                found = createDirectory(currentId, segment)
+            }
+            if (found == null) return null
             directoryIds[currentPath] = found
             currentId = found
         }
