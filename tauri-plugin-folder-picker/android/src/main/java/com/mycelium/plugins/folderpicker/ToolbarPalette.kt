@@ -2,6 +2,7 @@ package com.mycelium.plugins.folderpicker
 
 import android.graphics.Color
 
+/**
  * Toolbar colours for one theme.
  *
  * These were hardcoded to their light values, so on a dark-themed device the
@@ -12,7 +13,7 @@ import android.graphics.Color
  *
  * Every label pair measures at least 4.64:1 against its own background.
  */
-private data class ToolbarPalette(
+internal data class ToolbarPalette(
     val background: Int,
     val separator: Int,
     val label: Int,
