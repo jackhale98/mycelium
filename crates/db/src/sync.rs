@@ -45,7 +45,21 @@ fn keep_entry(entry: &DirEntry) -> bool {
 /// Uses filesystem mtime to detect changes cheaply — only reads and re-indexes
 /// files whose modification time differs from what's stored in the DB.
 /// This handles git pulls, external edits, and any other file changes efficiently.
+/// Index a vault that is a real directory.
 pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, SyncError> {
+    sync_vault_with(conn, vault_path, &crate::vaultfs::NativeFs)
+}
+
+/// Index a vault through any [`VaultFs`].
+///
+/// Android reaches its vault over the Storage Access Framework rather than the
+/// filesystem, and this is the seam where that difference stops mattering: the
+/// listing, the mtimes and the reads all come from `fs`.
+pub fn sync_vault_with(
+    conn: &Connection,
+    vault_path: &str,
+    fs: &dyn crate::vaultfs::VaultFs,
+) -> Result<SyncResult, SyncError> {
     schema::init_schema(conn).map_err(|e| SyncError::Database(e.to_string()))?;
     schema::init_fts(conn).map_err(|e| SyncError::Database(e.to_string()))?;
 
@@ -56,38 +70,15 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
 
     let mut result = SyncResult::default();
 
-    // Walk the vault directory for .org files, collecting path + mtime
-    // follow_links(true) ensures symlinks are followed (common in synced vaults)
-    let mut org_files: Vec<(String, String)> = Vec::new();
-    for entry_result in WalkDir::new(vault_path)
-        .follow_links(true)
-        .into_iter()
-        .filter_entry(keep_entry)
-    {
-        match entry_result {
-            Err(err) => {
-                let msg = format!("walkdir: {}", err);
-                eprintln!("{}", msg);
-                result.walk_errors.push(msg);
-                continue;
-            }
-            Ok(entry) => {
-                if !entry.file_type().is_file() { continue; }
-                let is_org = entry.path()
-                    .extension()
-                    .map(|ext| ext == "org")
-                    .unwrap_or(false);
-                if !is_org { continue; }
-
-                let path = entry.path().to_string_lossy().to_string();
-                let mtime = entry.metadata().ok()
-                    .and_then(|m| m.modified().ok())
-                    .map(mtime_stamp)
-                    .unwrap_or_default();
-                org_files.push((path, mtime));
-            }
+    let org_files: Vec<(String, String)> = match fs.list_org_files(vault_path) {
+        Ok(entries) => entries.into_iter().map(|e| (e.path, e.mtime)).collect(),
+        Err(err) => {
+            let msg = format!("listing {vault_path}: {err}");
+            eprintln!("{msg}");
+            result.walk_errors.push(msg);
+            Vec::new()
         }
-    }
+    };
 
     let current_files: HashSet<String> = org_files.iter().map(|(p, _)| p.clone()).collect();
 
@@ -119,7 +110,7 @@ pub fn sync_vault(conn: &Connection, vault_path: &str) -> Result<SyncResult, Syn
         };
 
         if needs_update {
-            let content = std::fs::read_to_string(file_path)
+            let content = fs.read_to_string(file_path)
                 .map_err(|e| SyncError::Io(format!("{}: {}", file_path, e)))?;
 
             // Double-check with hash to avoid unnecessary re-index

@@ -27,6 +27,14 @@ impl WatcherHandle {
 pub struct AppState {
     pub db: Mutex<Option<Connection>>,
     pub vault_path: Mutex<Option<PathBuf>>,
+    /// How the open vault's files are reached.
+    ///
+    /// A real directory on desktop and iOS; on Android the Storage Access
+    /// Framework bridge, since the folder the user grants has no path. Chosen
+    /// once when a vault opens so nothing below has to ask which platform it is
+    /// on. Defaults to the native one, which is also what an unopened vault
+    /// wants — the alternative would be an Option every caller has to unwrap.
+    vault_fs: Mutex<Arc<dyn db::VaultFs>>,
     own_writes: Mutex<HashMap<String, (String, Instant)>>,
     watcher: Mutex<Option<WatcherHandle>>,
 }
@@ -41,6 +49,7 @@ impl AppState {
         AppState {
             db: Mutex::new(None),
             vault_path: Mutex::new(None),
+            vault_fs: Mutex::new(Arc::new(db::NativeFs)),
             own_writes: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),
         }
@@ -65,6 +74,16 @@ impl AppState {
 
     pub fn set_db(&self, conn: Option<Connection>) {
         *lock(&self.db) = conn;
+    }
+
+    /// The open vault's file access. Cloned rather than borrowed so a caller
+    /// can do file work without holding the lock across it.
+    pub fn vault_fs(&self) -> Arc<dyn db::VaultFs> {
+        Arc::clone(&lock(&self.vault_fs))
+    }
+
+    pub fn set_vault_fs(&self, fs: Arc<dyn db::VaultFs>) {
+        *lock(&self.vault_fs) = fs;
     }
 
     pub fn set_vault_path(&self, path: Option<PathBuf>) {

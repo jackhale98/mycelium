@@ -2,6 +2,7 @@ use crate::state::AppState;
 use crate::watcher;
 use db::sync;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -41,8 +42,13 @@ pub async fn open_vault(
     // Open database
     let conn = db::open_db(&path).map_err(|e| e.to_string())?;
 
+    // How this vault's files are reached, decided once here so nothing below has
+    // to ask what platform it is on.
+    let vault_fs = vault_fs_for(&app);
+
     // Sync vault
-    let result = sync::sync_vault(&conn, &path).map_err(|e| e.to_string())?;
+    let result =
+        sync::sync_vault_with(&conn, &path, vault_fs.as_ref()).map_err(|e| e.to_string())?;
 
     // Let the webview load images out of the vault through the asset protocol.
     if let Err(e) = app.asset_protocol_scope().allow_directory(&vault_path, true) {
@@ -53,6 +59,7 @@ pub async fn open_vault(
     state.stop_watcher();
     state.clear_own_writes();
     state.set_db(Some(conn));
+    state.set_vault_fs(vault_fs);
     state.set_vault_path(Some(vault_path));
 
     // Start file watcher (desktop only, non-blocking)
@@ -76,8 +83,10 @@ pub async fn sync_vault(
     let vault_path = state.vault_path()?;
     let path_str = vault_path.to_string_lossy().to_string();
 
-    let result =
-        state.with_db(|conn| sync::sync_vault(conn, &path_str).map_err(|e| e.to_string()))?;
+    let vault_fs = state.vault_fs();
+    let result = state.with_db(|conn| {
+        sync::sync_vault_with(conn, &path_str, vault_fs.as_ref()).map_err(|e| e.to_string())
+    })?;
 
     // Views listen for this; without it a sync triggered on resume updates the
     // database while every open screen keeps showing what it read before.
@@ -118,15 +127,31 @@ pub async fn rebuild_database(
     let vault_path = state.vault_path()?;
     let path_str = vault_path.to_string_lossy().to_string();
 
+    let vault_fs = state.vault_fs();
     let result = state.with_db(|conn| {
         // `DELETE FROM nodes_fts` is a no-op on an external-content FTS5 table, so
         // the reset goes through the FTS5 'rebuild' command instead.
         db::reset_database(conn).map_err(|e| format!("Failed to clear database: {e}"))?;
 
         // Re-index everything
-        sync::sync_vault(conn, &path_str).map_err(|e| e.to_string())
+        sync::sync_vault_with(conn, &path_str, vault_fs.as_ref()).map_err(|e| e.to_string())
     })?;
 
     let _ = app.emit("db-updated", ());
     Ok(result)
+}
+
+/// The file access an opening vault should use.
+///
+/// Android's vault is a Storage Access Framework tree with no path behind it,
+/// so it goes through the plugin bridge; everywhere else the vault is a real
+/// directory, including iOS once the security-scoped bookmark is resolved.
+#[cfg(target_os = "android")]
+fn vault_fs_for<R: tauri::Runtime>(app: &AppHandle<R>) -> Arc<dyn db::VaultFs> {
+    Arc::new(crate::androidfs::AndroidFs::new(app.clone()))
+}
+
+#[cfg(not(target_os = "android"))]
+fn vault_fs_for<R: tauri::Runtime>(_app: &AppHandle<R>) -> Arc<dyn db::VaultFs> {
+    Arc::new(db::NativeFs)
 }
