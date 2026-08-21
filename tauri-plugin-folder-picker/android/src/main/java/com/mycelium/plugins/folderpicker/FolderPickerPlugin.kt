@@ -3,6 +3,7 @@ package com.mycelium.plugins.folderpicker
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.DatePickerDialog
+import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
@@ -28,10 +29,74 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
+/**
+ * Toolbar colours for one theme.
+ *
+ * These were hardcoded to their light values, so on a dark-themed device the
+ * toolbar rendered as a bright bar above the keyboard with low-contrast labels.
+ * The web UI solves this with CSS custom properties, which cannot reach a view
+ * built in Kotlin, so the same palette is mirrored here. Hues match the app's
+ * task-state tokens: a deadline is orange in the agenda and orange here.
+ *
+ * Every label pair measures at least 4.64:1 against its own background.
+ */
+private data class ToolbarPalette(
+    val background: Int,
+    val separator: Int,
+    val label: Int,
+    val link: Int,
+    val id: Int,
+    val todo: Int,
+    val priority: Int,
+    val tag: Int,
+    val deadline: Int,
+    val scheduled: Int,
+) {
+    companion object {
+        val LIGHT = ToolbarPalette(
+            background = Color.parseColor("#F2F2F7"),
+            separator = Color.parseColor("#C7C7CC"),
+            label = Color.parseColor("#1C1C1E"),
+            link = Color.parseColor("#166534"),
+            id = Color.parseColor("#BE185D"),
+            todo = Color.parseColor("#B91C1C"),
+            priority = Color.parseColor("#6D28D9"),
+            tag = Color.parseColor("#0F766E"),
+            deadline = Color.parseColor("#C2410C"),
+            scheduled = Color.parseColor("#1D4ED8"),
+        )
+
+        val DARK = ToolbarPalette(
+            background = Color.parseColor("#1C1C1E"),
+            separator = Color.parseColor("#3A3A3C"),
+            label = Color.parseColor("#E6EBF1"),
+            link = Color.parseColor("#4ADE80"),
+            id = Color.parseColor("#F9A8D4"),
+            todo = Color.parseColor("#FCA5A5"),
+            priority = Color.parseColor("#C4B5FD"),
+            tag = Color.parseColor("#5EEAD4"),
+            deadline = Color.parseColor("#FDBA74"),
+            scheduled = Color.parseColor("#93C5FD"),
+        )
+    }
+}
+
 @TauriPlugin
 class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
     private var webView: WebView? = null
     private var toolbarView: View? = null
+
+    /** Resolved per build, so following the device theme costs no extra state. */
+    private val palette: ToolbarPalette
+        get() {
+            val night = activity.resources.configuration.uiMode and
+                Configuration.UI_MODE_NIGHT_MASK
+            return if (night == Configuration.UI_MODE_NIGHT_YES) {
+                ToolbarPalette.DARK
+            } else {
+                ToolbarPalette.LIGHT
+            }
+        }
 
     override fun load(webView: WebView) {
         this.webView = webView
@@ -114,9 +179,10 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun createToolbarView(wv: WebView): View {
+        val theme = palette
         val scroll = HorizontalScrollView(activity).apply {
             isHorizontalScrollBarEnabled = false
-            setBackgroundColor(Color.parseColor("#F2F2F7"))
+            setBackgroundColor(theme.background)
         }
 
         val container = LinearLayout(activity).apply {
@@ -128,15 +194,15 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
         data class BtnDef(val label: String, val action: String, val color: Int? = null, val bold: Boolean = false)
 
         val buttons = listOf(
-            BtnDef("Link", "link", Color.parseColor("#16a34a"), true),
+            BtnDef("Link", "link", theme.link, true),
             BtnDef("|", ""),
             BtnDef("H", "heading", bold = true),
-            BtnDef("ID", "makeNode", Color.parseColor("#9333ea"), true),
-            BtnDef("TODO", "todo", Color.parseColor("#dc2626"), true),
-            BtnDef("[#]", "priority", Color.parseColor("#ea580c"), true),
-            BtnDef("Tag", "tag", Color.parseColor("#0d9488"), true),
-            BtnDef("DL", "deadline", Color.parseColor("#dc2626")),
-            BtnDef("SC", "scheduled", Color.parseColor("#2563eb")),
+            BtnDef("ID", "makeNode", theme.id, true),
+            BtnDef("TODO", "todo", theme.todo, true),
+            BtnDef("[#]", "priority", theme.priority, true),
+            BtnDef("Tag", "tag", theme.tag, true),
+            BtnDef("DL", "deadline", theme.deadline),
+            BtnDef("SC", "scheduled", theme.scheduled),
             BtnDef("|", ""),
             BtnDef("\uD835\uDC01", "bold", bold = true),  // 𝐁
             BtnDef("\uD835\uDC3C", "italic"),              // 𝐼
@@ -157,7 +223,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
             if (def.label == "|") {
                 // Separator
                 val sep = View(activity).apply {
-                    setBackgroundColor(Color.parseColor("#C7C7CC"))
+                    setBackgroundColor(theme.separator)
                     layoutParams = LinearLayout.LayoutParams(dpToPx(1), dpToPx(24)).apply {
                         setMargins(dpToPx(2), 0, dpToPx(2), 0)
                     }
@@ -170,7 +236,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
                 text = def.label
                 isAllCaps = false
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, if (def.label.length > 2) 11f else 13f)
-                if (def.color != null) setTextColor(def.color)
+                setTextColor(def.color ?: theme.label)
                 if (def.bold) {
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                 }
