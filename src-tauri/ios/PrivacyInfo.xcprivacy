@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Mycelium collects nothing and talks to no server. It reads and writes org
+	  files in a directory the user picks, and keeps its search index in the app
+	  container. There is no account, no analytics and no third-party SDK.
+
+	  CI copies this file into the generated Xcode project and registers it in
+	  the app target's resources; see .github/workflows/build-ios.yml.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!--
+			  The security-scoped bookmark for the user's vault, so the folder
+			  they chose is still reachable on the next launch.
+			  ExamplePlugin.swift stores it under `mycelium_vault_bookmark`.
+			  CA92.1 — information accessible only to the app itself.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!--
+			  Modification times drive incremental indexing: the vault is walked
+			  and only files whose mtime changed are re-parsed (crates/db/src/sync.rs).
+			  3B52.1 — files the user granted access to through the document picker.
+			  C617.1 — the index database inside the app container.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>3B52.1</string>
+				<string>C617.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -46,8 +46,21 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Rust tests (parser + db)
-        run: cargo test -p org-parser -p db
+      - name: Frontend type check
+        run: npx svelte-check --threshold error
+
+      - name: Frontend tests
+        run: npx vitest run
+
+      - name: Rust tests
+        # The whole workspace, not just the parser and db: the Tauri crate holds
+        # the path, atomic-write and temp-sweep tests.
+        run: cargo test --workspace
+
+      - name: Release script tests
+        # These patch the generated Xcode project, which only exists on a Mac
+        # runner, so their logic is tested here against a fixture instead.
+        run: python3 .github/scripts/test_add_privacy_manifest.py
 
       - name: Check Tauri compilation
         run: cargo check -p mycelium
