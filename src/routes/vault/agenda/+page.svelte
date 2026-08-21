@@ -313,7 +313,7 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<header class="agenda-gutter flex shrink-0 items-center gap-2 border-b border-surface-200 dark:border-surface-700" style="padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem); padding-bottom: 0.5rem; min-height: var(--tap);">
+	<header class="agenda-gutter flex shrink-0 items-center gap-2 border-b border-surface-200 dark:border-surface-700" style="padding-top: calc(var(--safe-area-top) + 0.5rem); padding-bottom: 0.5rem; min-height: var(--tap);">
 		<button onclick={() => navigation.navigateToVault()} class="flex shrink-0 items-center justify-center rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800" style="min-width:var(--tap);min-height:var(--tap)" aria-label="Back">
 			<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
 		</button>

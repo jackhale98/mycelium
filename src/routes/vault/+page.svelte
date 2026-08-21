@@ -127,7 +127,7 @@
 	<!-- Header -->
 	<header
 		class="flex shrink-0 items-center gap-2 border-b border-surface-200 px-4 dark:border-surface-700"
-		style="padding-top: calc(env(safe-area-inset-top, 0px) + 8px); padding-bottom: 8px;"
+		style="padding-top: calc(var(--safe-area-top) + 8px); padding-bottom: 8px;"
 	>
 		<img src="/logo.svg" alt="" class="h-7 w-7 shrink-0 rounded" />
 		<h1 class="shrink-0 text-lg font-semibold">Mycelium</h1>

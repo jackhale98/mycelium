@@ -44,7 +44,7 @@
 <!-- Capture sheet -->
 {#if open}
 	<button class="fixed inset-0 z-40 bg-black/40" onclick={() => (open = false)} aria-label="Close"></button>
-	<div class="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t bg-surface-0 p-4 shadow-2xl dark:border-surface-700 dark:bg-surface-900" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px))">
+	<div class="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t bg-surface-0 p-4 shadow-2xl dark:border-surface-700 dark:bg-surface-900" style="padding-bottom: calc(1rem + var(--safe-area-bottom))">
 		{#if saved}
 			<div class="py-4 text-center">
 				<span style="color:#16a34a;font-size:1.5rem">&#10003;</span>

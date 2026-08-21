@@ -102,7 +102,7 @@
 	<div
 		bind:this={toolbarEl}
 		class="flex h-12 items-center gap-0.5 overflow-x-auto border-t border-surface-200 bg-surface-50 px-2 dark:border-surface-700 dark:bg-surface-900"
-		style="-webkit-overflow-scrolling: touch; {keyboardOffset > 0 ? `position:fixed;bottom:${keyboardOffset}px;left:0;right:0;z-index:50;` : `flex-shrink:0;padding-bottom:env(safe-area-inset-bottom, 0px);`}"
+		style="-webkit-overflow-scrolling: touch; {keyboardOffset > 0 ? `position:fixed;bottom:${keyboardOffset}px;left:0;right:0;z-index:50;` : `flex-shrink:0;padding-bottom:var(--safe-area-bottom);`}"
 	>
 		<!-- Link (primary action) -->
 		<button onpointerdown={(e) => act(e, onLink)} title="Insert link (Cmd+K)" class="flex h-9 min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-semibold text-mycelium-700 hover:bg-surface-200 dark:text-mycelium-400 dark:hover:bg-surface-700">Link</button>

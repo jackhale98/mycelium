@@ -28,7 +28,7 @@
 
 <nav
 	class="shrink-0 border-t border-surface-200 bg-surface-0 dark:border-surface-700 dark:bg-surface-950 lg:hidden"
-	style="padding-bottom: env(safe-area-inset-bottom, 0px)"
+	style="padding-bottom: var(--safe-area-bottom)"
 >
 	<div class="flex h-12 items-center justify-around">
 	{#each tabs as tab}

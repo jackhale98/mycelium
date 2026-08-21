@@ -49,6 +49,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
     private val storage by lazy { VaultStorage(activity) }
     private val toolbar by lazy { KeyboardToolbar(activity) }
     private val backHandler by lazy { BackHandler(activity) }
+    private val systemInsets by lazy { SystemInsets(activity) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var webView: WebView? = null
 
@@ -174,6 +175,7 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
             // Back is a navigation concern, but it is installed here because this
             // is the point where the WebView is known to exist.
             backHandler.install(wv)
+            systemInsets.install(wv)
             invoke.resolve(JSObject().apply { put("installed", true) })
         }
     }

@@ -29,11 +29,16 @@
 	--color-surface-950: #020617;
 }
 
+/* Room the system bars take, from whichever source knows it.
+   iOS fills env(safe-area-inset-*); an Android WebView does not, so the plugin
+   pushes --android-inset-* in after asking the window for its insets. Use these
+   variables rather than env() directly, or Android edge-to-edge puts the header
+   under the status bar. */
 :root {
-	--safe-area-top: env(safe-area-inset-top, 0px);
-	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
-	--safe-area-left: env(safe-area-inset-left, 0px);
-	--safe-area-right: env(safe-area-inset-right, 0px);
+	--safe-area-top: var(--android-inset-top, env(safe-area-inset-top, 0px));
+	--safe-area-bottom: var(--android-inset-bottom, env(safe-area-inset-bottom, 0px));
+	--safe-area-left: var(--android-inset-left, env(safe-area-inset-left, 0px));
+	--safe-area-right: var(--android-inset-right, env(safe-area-inset-right, 0px));
 }
 
 /* Ensure the app fills the full viewport including behind notch/home indicator */
