@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.mycelium.plugins.folderpicker"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         minSdk = 24
     }

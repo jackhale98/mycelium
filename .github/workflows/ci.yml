@@ -65,7 +65,9 @@ jobs:
       - name: Release script tests
         # These patch the generated Xcode project, which only exists on a Mac
         # runner, so their logic is tested here against a fixture instead.
-        run: python3 .github/scripts/test_add_privacy_manifest.py
+        run: |
+          python3 .github/scripts/test_add_privacy_manifest.py
+          python3 .github/scripts/test_add_android_signing.py
 
       - name: Check Tauri compilation
         run: cargo check -p mycelium
