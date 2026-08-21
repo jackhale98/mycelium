@@ -53,6 +53,17 @@ jobs:
       - name: Initialize Android project
         run: npx tauri android init
 
+      - name: Report the generated Android project
+        run: |
+          # Release signing has to be injected into a file tauri regenerates on
+          # every build. Print it rather than guess at its shape.
+          echo "--- app/build.gradle.kts ---"
+          sed -n '1,120p' src-tauri/gen/android/app/build.gradle.kts
+          echo "--- files ---"
+          find src-tauri/gen/android -maxdepth 2 -name '*.gradle*' -o -maxdepth 2 -name '*.properties' | sort
+          echo "--- manifest sdk levels ---"
+          grep -rn 'minSdk\|targetSdk\|compileSdk' src-tauri/gen/android/app/build.gradle.kts || true
+
       - name: Build frontend
         run: npm run build
 
