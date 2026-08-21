@@ -37,6 +37,59 @@ fn canonicalize_lenient(path: &Path) -> Result<PathBuf, String> {
 
 /// Resolve a user-supplied path against the vault and guarantee it stays inside it.
 /// Handles paths that do not exist yet (writes) as well as existing files.
+/// Reduce a vault-relative path to a canonical form, refusing to escape.
+///
+/// Used where there is no filesystem to canonicalise against — an Android vault
+/// is a Storage Access Framework tree, and its files are addressed by a path
+/// relative to that tree rather than by anything `realpath(3)` could resolve. So
+/// containment is enforced textually here instead: a `..` cannot be checked
+/// after the fact, it has to be refused outright.
+pub fn normalize_relative(file_path: &str) -> Result<String, String> {
+    if file_path.is_empty() {
+        return Err("Empty file path.".to_string());
+    }
+    // A rooted path means something outside the tree the user granted.
+    if file_path.starts_with('/') || file_path.starts_with('\\') {
+        return Err(OUTSIDE_VAULT.to_string());
+    }
+
+    let mut parts: Vec<&str> = Vec::new();
+    for segment in file_path.split(['/', '\\']) {
+        match segment {
+            "" | "." => continue,
+            ".." => return Err(OUTSIDE_VAULT.to_string()),
+            other => parts.push(other),
+        }
+    }
+    if parts.is_empty() {
+        return Err("Empty file path.".to_string());
+    }
+    Ok(parts.join("/"))
+}
+
+/// The key a file is known by, to both [`db::VaultFs`] and the index.
+///
+/// Natively that is its canonical absolute path, proven to sit inside the vault.
+/// On Android it is the vault-relative path, because the vault has no path of
+/// its own for one to be absolute against.
+#[cfg(not(target_os = "android"))]
+pub fn vault_key(vault_path: &Path, file_path: &str) -> Result<String, String> {
+    // Reject an obviously escaping relative path before touching the filesystem.
+    // `resolve_in_vault` would catch it anyway by canonicalising, but only after
+    // walking the path; this also keeps the two platforms refusing the same input.
+    if !Path::new(file_path).is_absolute() {
+        normalize_relative(file_path)?;
+    }
+    Ok(resolve_in_vault(vault_path, file_path)?
+        .to_string_lossy()
+        .to_string())
+}
+
+#[cfg(target_os = "android")]
+pub fn vault_key(_vault_path: &Path, file_path: &str) -> Result<String, String> {
+    normalize_relative(file_path)
+}
+
 pub fn resolve_in_vault(vault_path: &Path, file_path: &str) -> Result<PathBuf, String> {
     if file_path.is_empty() {
         return Err("Empty file path.".to_string());
@@ -230,5 +283,37 @@ mod tests {
         assert_eq!(detect_image_kind(b"<svg xmlns=\"...\">"), Some("svg"));
         assert_eq!(detect_image_kind(b"#!/bin/sh\nrm -rf /"), None);
         assert_eq!(detect_image_kind(b""), None);
+    }
+
+    #[test]
+    fn normalize_relative_keeps_paths_inside_the_vault() {
+        assert_eq!(normalize_relative("inbox.org").unwrap(), "inbox.org");
+        assert_eq!(normalize_relative("daily/2026-08-21.org").unwrap(), "daily/2026-08-21.org");
+        assert_eq!(normalize_relative("./daily//note.org").unwrap(), "daily/note.org");
+        assert_eq!(normalize_relative("a\\b.org").unwrap(), "a/b.org");
+    }
+
+    #[test]
+    fn normalize_relative_refuses_to_escape() {
+        for path in [
+            "../secrets.org",
+            "daily/../../secrets.org",
+            "..",
+            "/etc/passwd",
+            "\\etc\\passwd",
+        ] {
+            assert_eq!(
+                normalize_relative(path).unwrap_err(),
+                OUTSIDE_VAULT,
+                "{path} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_relative_rejects_nothing_paths() {
+        for path in ["", ".", "./", "//"] {
+            assert!(normalize_relative(path).is_err(), "{path} should be refused");
+        }
     }
 }

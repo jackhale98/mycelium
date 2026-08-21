@@ -19,9 +19,12 @@ pub struct FileMeta {
 #[tauri::command]
 pub async fn read_file(file_path: String, state: State<'_, AppState>) -> Result<String, String> {
     let vault_path = state.vault_path()?;
-    let full_path = fsutil::resolve_in_vault(&vault_path, &file_path)?;
+    let key = fsutil::vault_key(&vault_path, &file_path)?;
 
-    std::fs::read_to_string(&full_path).map_err(|e| format!("Failed to read file: {e}"))
+    state
+        .vault_fs()
+        .read_to_string(&key)
+        .map_err(|e| format!("Failed to read file: {e}"))
 }
 
 /// Read an org file together with its content hash, for optimistic-concurrency saves.
@@ -31,10 +34,12 @@ pub async fn read_file_meta(
     state: State<'_, AppState>,
 ) -> Result<FileMeta, String> {
     let vault_path = state.vault_path()?;
-    let full_path = fsutil::resolve_in_vault(&vault_path, &file_path)?;
+    let key = fsutil::vault_key(&vault_path, &file_path)?;
 
-    let content =
-        std::fs::read_to_string(&full_path).map_err(|e| format!("Failed to read file: {e}"))?;
+    let content = state
+        .vault_fs()
+        .read_to_string(&key)
+        .map_err(|e| format!("Failed to read file: {e}"))?;
     let hash = fsutil::content_hash(&content);
 
     Ok(FileMeta { content, hash })
@@ -53,13 +58,13 @@ pub async fn save_file(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let vault_path = state.vault_path()?;
-    let full_path = fsutil::resolve_in_vault(&vault_path, &file_path)?;
+    let key = fsutil::vault_key(&vault_path, &file_path)?;
 
     if let Some(expected) = &expected_hash {
-        check_no_conflict(&full_path, expected)?;
+        check_no_conflict(&state, &key, expected)?;
     }
 
-    let hash = write_and_index(&state, &full_path, &content)?;
+    let hash = write_and_index(&state, &key, &content)?;
 
     let _ = app.emit("db-updated", ());
 
@@ -67,8 +72,8 @@ pub async fn save_file(
 }
 
 /// Reject the write when the file on disk is not what the caller last read.
-fn check_no_conflict(path: &Path, expected: &str) -> Result<(), String> {
-    match std::fs::read_to_string(path) {
+fn check_no_conflict(state: &AppState, key: &str, expected: &str) -> Result<(), String> {
+    match state.vault_fs().read_to_string(key) {
         Ok(current) => {
             let actual = fsutil::content_hash(&current);
             if actual != expected {
@@ -78,7 +83,7 @@ fn check_no_conflict(path: &Path, expected: &str) -> Result<(), String> {
             }
             Ok(())
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        Err(db::VaultFsError::NotFound(_)) => {
             if expected.is_empty() {
                 Ok(())
             } else {
@@ -93,15 +98,17 @@ fn check_no_conflict(path: &Path, expected: &str) -> Result<(), String> {
 
 /// Write a vault file atomically and re-index it, suppressing the watcher echo.
 /// Returns the content hash of what was written.
-pub fn write_and_index(state: &AppState, path: &Path, content: &str) -> Result<String, String> {
-    fsutil::atomic_write(path, content)?;
+pub fn write_and_index(state: &AppState, key: &str, content: &str) -> Result<String, String> {
+    state
+        .vault_fs()
+        .write(key, content)
+        .map_err(|e| format!("Failed to write file: {e}"))?;
 
     let hash = fsutil::content_hash(content);
-    let path_str = path.to_string_lossy().to_string();
-    state.note_own_write(&path_str, &hash);
+    state.note_own_write(key, &hash);
 
     state.with_db(|conn| {
-        index::index_file(conn, &path_str, content).map_err(|e| format!("Failed to index file: {e}"))
+        index::index_file(conn, key, content).map_err(|e| format!("Failed to index file: {e}"))
     })?;
 
     Ok(hash)
@@ -131,20 +138,20 @@ pub async fn quick_capture(
     let node = daily::ensure_daily(&app, &state, &local_date, Some(&timestamp))?;
 
     let vault_path = state.vault_path()?;
-    let file_path = fsutil::resolve_in_vault(&vault_path, &node.file)?;
+    let key = fsutil::vault_key(&vault_path, &node.file)?;
 
     let mut content =
-        std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read daily note: {e}"))?;
+        state.vault_fs().read_to_string(&key).map_err(|e| format!("Failed to read daily note: {e}"))?;
 
     if !content.is_empty() && !content.ends_with('\n') {
         content.push('\n');
     }
     content.push_str(&format!("- [{local_time}] {text}\n"));
 
-    write_and_index(&state, &file_path, &content)?;
+    write_and_index(&state, &key, &content)?;
 
     let _ = app.emit("db-updated", ());
-    Ok(file_path.to_string_lossy().to_string())
+    Ok(key)
 }
 
 /// Create a new org file with a UUID node (file-level property drawer).
@@ -163,16 +170,14 @@ pub async fn create_file(
     let id = uuid::Uuid::new_v4().to_string();
 
     let slug = slugify(&title);
-    let file_path = unique_org_path(&vault_path, &timestamp, &slug);
-
-    let full_path = fsutil::resolve_in_vault(&vault_path, &file_path.to_string_lossy())?;
+    let key = unique_org_key(&state, &vault_path, "", &timestamp, &slug)?;
 
     let content = format!(":PROPERTIES:\n:ID: {id}\n:END:\n#+TITLE: {title}\n");
 
-    write_and_index(&state, &full_path, &content)?;
+    write_and_index(&state, &key, &content)?;
 
     let _ = app.emit("db-updated", ());
-    Ok(full_path.to_string_lossy().to_string())
+    Ok(key)
 }
 
 /// Import an image file into the vault's images/ directory.
@@ -259,15 +264,40 @@ fn unique_image_name(images_dir: &Path, stem: &str, ext: &str) -> String {
 }
 
 /// Build a non-colliding `YYYYMMDDHHmmss-slug.org` path inside `dir`.
-pub fn unique_org_path(dir: &Path, timestamp: &str, slug: &str) -> PathBuf {
-    let slug = if slug.is_empty() { "untitled" } else { slug };
-    let mut path = dir.join(format!("{timestamp}-{slug}.org"));
-    let mut counter = 2;
-    while path.exists() {
-        path = dir.join(format!("{timestamp}-{slug}-{counter}.org"));
-        counter += 1;
+/// A free `<timestamp>-<slug>.org` name inside `dir_rel`, as a vault-relative path.
+///
+/// The companion to [`unique_org_path`] for code that has to work on Android,
+/// where the vault is a Storage Access Framework tree and `Path::exists` has
+/// nothing to answer against. Existence is asked of the vault instead.
+pub fn unique_org_key(
+    state: &AppState,
+    vault_path: &Path,
+    dir_rel: &str,
+    timestamp: &str,
+    slug: &str,
+) -> Result<String, String> {
+    let fs = state.vault_fs();
+    for counter in 1..=1000 {
+        let name = org_file_name(timestamp, slug, counter);
+        let rel = if dir_rel.is_empty() { name } else { format!("{dir_rel}/{name}") };
+        let key = fsutil::vault_key(vault_path, &rel)?;
+        if !fs.exists(&key) {
+            return Ok(key);
+        }
     }
-    path
+    // A vault cannot plausibly hold this many collisions; bail rather than spin.
+    Err(format!("could not find a free name for {timestamp}-{slug}"))
+}
+
+/// The org-roam filename for the `counter`-th attempt at a title. The first
+/// carries no suffix, so ordinary notes are named as org-roam names them.
+pub fn org_file_name(timestamp: &str, slug: &str, counter: u32) -> String {
+    let slug = if slug.is_empty() { "untitled" } else { slug };
+    if counter <= 1 {
+        format!("{timestamp}-{slug}.org")
+    } else {
+        format!("{timestamp}-{slug}-{counter}.org")
+    }
 }
 
 /// Convert a title to an org-roam compatible slug.
@@ -363,57 +393,26 @@ mod tests {
     }
 
     #[test]
-    fn unique_org_path_falls_back_for_empty_slug() {
-        let dir = tmp_dir("slug");
-        let path = unique_org_path(&dir, "20260817120000", &slugify("🎉"));
-        assert_eq!(
-            path.file_name().unwrap().to_string_lossy(),
-            "20260817120000-untitled.org"
-        );
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn unique_org_path_deduplicates_same_second_collisions() {
-        let dir = tmp_dir("dedup");
-        let first = unique_org_path(&dir, "20260817120000", "note");
-        std::fs::write(&first, "x").unwrap();
-        let second = unique_org_path(&dir, "20260817120000", "note");
-        std::fs::write(&second, "x").unwrap();
-        let third = unique_org_path(&dir, "20260817120000", "note");
-
-        assert_eq!(
-            first.file_name().unwrap().to_string_lossy(),
-            "20260817120000-note.org"
-        );
-        assert_eq!(
-            second.file_name().unwrap().to_string_lossy(),
-            "20260817120000-note-2.org"
-        );
-        assert_eq!(
-            third.file_name().unwrap().to_string_lossy(),
-            "20260817120000-note-3.org"
-        );
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
     fn conflict_detection_matches_on_disk_content() {
+        // A fresh AppState reads through NativeFs, which is what a desktop or
+        // iOS vault uses; the check itself is platform-independent.
+        let state = AppState::new();
         let dir = tmp_dir("conflict");
         let file = dir.join("note.org");
+        let key = file.to_string_lossy().to_string();
         std::fs::write(&file, "original").unwrap();
 
         let hash = fsutil::content_hash("original");
-        assert!(check_no_conflict(&file, &hash).is_ok());
+        assert!(check_no_conflict(&state, &key, &hash).is_ok());
 
         std::fs::write(&file, "changed by syncthing").unwrap();
-        let err = check_no_conflict(&file, &hash).unwrap_err();
+        let err = check_no_conflict(&state, &key, &hash).unwrap_err();
         assert!(err.starts_with(CONFLICT_PREFIX));
 
         std::fs::remove_file(&file).unwrap();
-        let err = check_no_conflict(&file, &hash).unwrap_err();
+        let err = check_no_conflict(&state, &key, &hash).unwrap_err();
         assert!(err.starts_with(CONFLICT_PREFIX));
-        assert!(check_no_conflict(&file, "").is_ok());
+        assert!(check_no_conflict(&state, &key, "").is_ok());
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -445,5 +444,27 @@ mod tests {
         assert_eq!(first, "photo.png");
         assert_eq!(second, "photo-1.png");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn org_file_name_matches_org_roam_naming() {
+        assert_eq!(
+            org_file_name("20260817120000", "my_note", 1),
+            "20260817120000-my_note.org"
+        );
+        // Collisions get a suffix; the first attempt never does.
+        assert_eq!(
+            org_file_name("20260817120000", "my_note", 2),
+            "20260817120000-my_note-2.org"
+        );
+    }
+
+    #[test]
+    fn org_file_name_falls_back_for_an_empty_slug() {
+        // A title of only emoji or punctuation slugifies to nothing.
+        assert_eq!(
+            org_file_name("20260817120000", &slugify("🎉"), 1),
+            "20260817120000-untitled.org"
+        );
     }
 }

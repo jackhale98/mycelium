@@ -1,6 +1,8 @@
 use crate::commands::editor::{
-    slugify, unique_org_path, validate_local_date, validate_timestamp, write_and_index,
+    slugify, unique_org_key, validate_local_date, validate_timestamp,
+    write_and_index,
 };
+use crate::fsutil;
 use crate::state::AppState;
 use db::query;
 use tauri::{AppHandle, Emitter, State};
@@ -46,16 +48,20 @@ pub fn ensure_daily(
     };
 
     let vault_path = state.vault_path()?;
-    let daily_dir = vault_path.join("daily");
-    std::fs::create_dir_all(&daily_dir)
+    // The vault creates the directory, so this works whether it is a real one or
+    // a Storage Access Framework tree.
+    let daily_key = fsutil::vault_key(&vault_path, "daily")?;
+    state
+        .vault_fs()
+        .create_dir_all(&daily_key)
         .map_err(|e| format!("Failed to create daily directory: {e}"))?;
 
     let id = uuid::Uuid::new_v4().to_string();
-    let file_path = unique_org_path(&daily_dir, &timestamp, &slugify(date));
+    let key = unique_org_key(state, &vault_path, "daily", &timestamp, &slugify(date))?;
 
     let content = format!(":PROPERTIES:\n:ID: {id}\n:END:\n#+TITLE: {date}\n\n");
 
-    write_and_index(state, &file_path, &content)?;
+    write_and_index(state, &key, &content)?;
 
     let _ = app.emit("db-updated", ());
 
