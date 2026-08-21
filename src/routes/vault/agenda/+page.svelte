@@ -9,11 +9,11 @@
 	import type { HeadlineRecord } from '$lib/types/node';
 	import {
 		agendaReason, applyRepeaterOnDone, compareTasks, getTodoKeyword, isDoneKeyword,
-		isHeadlineLine, overdueItems as findOverdue, repeatKeyword, setClosed,
-		setPlanningDate, setPriority as setHeadlinePriority, setTodoKeyword, removePlanning,
-		timestampDate,
+		isHeadlineLine, isOverdue, keywordCategoryClass, overdueItems as findOverdue,
+		repeatKeyword, setClosed, setPlanningDate, setPriority as setHeadlinePriority,
+		setTodoKeyword, removePlanning, timestampDate,
 	} from '$lib/org';
-	import type { KeywordConfig, PlanningKind } from '$lib/org';
+	import type { PlanningKind } from '$lib/org';
 
 	let items = $state<HeadlineRecord[]>([]);
 	let error = $state<string | null>(null);
@@ -49,16 +49,17 @@
 
 	// ── Helpers ──────────────────────────────────────────────────
 
-	function keywordConfig(): KeywordConfig {
-		return { todoKeywords: orgConfig.todoKeywords, doneKeywords: orgConfig.doneKeywords };
-	}
-
 	function priorityConfig() {
 		return { priorities: orgConfig.priorities };
 	}
 
 	function nowForOrg() {
 		return { date: localDate(), time: localTime() };
+	}
+
+	/** Stable identity for a headline, for keyed lists and per-row UI state. */
+	function rowKey(item: HeadlineRecord): string {
+		return item.node_id ?? `${item.file}:${item.line}`;
 	}
 
 	function extractDate(raw: string | null): string {
@@ -68,13 +69,6 @@
 	function extractTime(raw: string | null): string {
 		const m = raw?.match(/(\d{1,2}:\d{2})/);
 		return m ? m[1] : '';
-	}
-
-	function dateTimeValue(raw: string | null): string {
-		const date = extractDate(raw);
-		if (!date) return '';
-		const time = extractTime(raw);
-		return time ? `${date}T${time}` : date;
 	}
 
 	/** Navigate to the node for an agenda item */
@@ -87,13 +81,19 @@
 		if (fileNode) navigation.navigateToNode(fileNode.id);
 	}
 
+	/** A tap anywhere dismisses an open swipe before it does anything else. */
+	function activateRow(item: HeadlineRecord) {
+		if (openRow !== null) { openRow = null; return; }
+		navigateToItem(item);
+	}
+
 	function isPastDue(n: HeadlineRecord): boolean {
 		const dl = extractDate(n.deadline);
 		return !!dl && dl < today && !isDone(n);
 	}
 
 	function isDone(n: HeadlineRecord): boolean {
-		return isDoneKeyword(n.todo ?? null, keywordConfig());
+		return isDoneKeyword(n.todo ?? null, orgConfig.keywordConfig);
 	}
 
 	// ── Weekly agenda ───────────────────────────────────────────
@@ -119,16 +119,17 @@
 		for (const n of items) {
 			const reason = agendaReason(n, date, today, done);
 			if (!reason) continue;
+			// Late work is listed in the Overdue block above. Without this it was
+			// drawn a second time under Today, doubling every overdue task.
+			if (date === today && isOverdue(n, today, done)) continue;
 			const source = reason.includes('deadline') ? n.deadline : n.scheduled;
 			result.push({
 				node: n,
 				reason,
 				time: extractTime(source),
-				label: reason === 'overdue-scheduled'
-					? `Sched. ${daysBetween(extractDate(n.scheduled), date)}x`
-					: reason === 'upcoming-deadline'
-						? `In ${daysBetween(date, extractDate(n.deadline))} d.`
-						: null,
+				label: reason === 'upcoming-deadline'
+					? `In ${daysBetween(date, extractDate(n.deadline))} d.`
+					: null,
 			});
 		}
 		result.sort((a, b) => {
@@ -158,6 +159,76 @@
 		}).sort((a, b) => compareTasks(a, b, priorityConfig()))
 	);
 
+	// ── Swipe-to-edit ───────────────────────────────────────────
+	// The row tracks its offset in state rather than writing transforms onto the
+	// DOM: an imperative transform survived the keyed diff on refresh and stranded
+	// an open row's offset on whatever task took its place.
+
+	/** Travel before the gesture commits to an axis. */
+	const AXIS_LOCK = 10;
+
+	let openRow = $state<string | null>(null);
+	let dragRow = $state<string | null>(null);
+	let dragOffset = $state(0);
+	let dragWidth = $state(0);
+
+	let gesture:
+		| { key: string; x: number; y: number; width: number; base: number; axis: 'h' | 'v' | null }
+		| null = null;
+
+	function onRowTouchStart(event: TouchEvent, key: string) {
+		const touch = event.touches[0];
+		if (!touch) return;
+		// The action panel is sized in vw/rem, so its width is read from layout
+		// rather than hardcoded — it differs per screen and after a rotation.
+		const actions = (event.currentTarget as HTMLElement).querySelector('[data-actions]');
+		const width = actions instanceof HTMLElement ? actions.offsetWidth : 0;
+		if (width === 0) return;
+		gesture = {
+			key,
+			x: touch.clientX,
+			y: touch.clientY,
+			width,
+			base: openRow === key ? -width : 0,
+			axis: null,
+		};
+		dragWidth = width;
+	}
+
+	function onRowTouchMove(event: TouchEvent) {
+		if (!gesture) return;
+		const touch = event.touches[0];
+		if (!touch) return;
+		const dx = touch.clientX - gesture.x;
+		const dy = touch.clientY - gesture.y;
+
+		if (gesture.axis === null) {
+			if (Math.abs(dx) < AXIS_LOCK && Math.abs(dy) < AXIS_LOCK) return;
+			// Ties go to the list: it is scrolled far more often than a row is swiped.
+			gesture.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+			if (gesture.axis === 'h') dragRow = gesture.key;
+		}
+		if (gesture.axis !== 'h') return;
+
+		dragOffset = Math.max(-gesture.width, Math.min(0, gesture.base + dx));
+	}
+
+	function onRowTouchEnd() {
+		if (!gesture) return;
+		if (gesture.axis === 'h') {
+			openRow = dragOffset < -gesture.width / 2 ? gesture.key : null;
+		}
+		gesture = null;
+		dragRow = null;
+		dragOffset = 0;
+	}
+
+	/** How far the actions are revealed, 0–1, for fading them in. */
+	function revealed(key: string): number {
+		if (dragRow === key) return dragWidth > 0 ? Math.min(1, Math.abs(dragOffset) / dragWidth) : 0;
+		return openRow === key ? 1 : 0;
+	}
+
 	// ── Inline editing ──────────────────────────────────────────
 
 	/**
@@ -168,7 +239,7 @@
 		node: HeadlineRecord,
 		fn: (lines: string[], idx: number) => string[]
 	) {
-		changingId = node.node_id ?? `${node.file}:${node.line}`;
+		changingId = rowKey(node);
 		try {
 			const file = await readFileMeta(node.file);
 			const lines = file.content.split('\n');
@@ -191,7 +262,10 @@
 				: message;
 			if (message.includes('CONFLICT:')) await refresh();
 		}
-		finally { changingId = null; }
+		finally {
+			changingId = null;
+			openRow = null;
+		}
 	}
 
 	/**
@@ -201,7 +275,7 @@
 	 */
 	async function setState(node: HeadlineRecord, state: string | null) {
 		await editHeadline(node, (lines, idx) => {
-			const config = keywordConfig();
+			const config = orgConfig.keywordConfig;
 			const wasDone = isDoneKeyword(getTodoKeyword(lines[idx], config), config);
 			const becomesDone = isDoneKeyword(state, config);
 			let next = [...lines];
@@ -225,7 +299,7 @@
 	async function setPriority(node: HeadlineRecord, priority: string | null) {
 		await editHeadline(node, (lines, idx) => {
 			const next = [...lines];
-			next[idx] = setHeadlinePriority(next[idx], priority, keywordConfig());
+			next[idx] = setHeadlinePriority(next[idx], priority, orgConfig.keywordConfig);
 			return next;
 		});
 	}
@@ -239,46 +313,47 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<header class="flex shrink-0 items-center gap-2 border-b border-surface-200 px-4 dark:border-surface-700" style="padding-top: calc(env(safe-area-inset-top, 0px) + 8px); padding-bottom: 8px; min-height: 48px;">
-		<button onclick={() => navigation.navigateToVault()} class="rounded-lg p-2 hover:bg-surface-100 dark:hover:bg-surface-800" aria-label="Back">
+	<header class="agenda-gutter flex shrink-0 items-center gap-2 border-b border-surface-200 dark:border-surface-700" style="padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem); padding-bottom: 0.5rem; min-height: var(--tap);">
+		<button onclick={() => navigation.navigateToVault()} class="flex shrink-0 items-center justify-center rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800" style="min-width:var(--tap);min-height:var(--tap)" aria-label="Back">
 			<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
 		</button>
 		<h1 class="flex-1 text-lg font-semibold">Agenda</h1>
-		<span class="text-xs text-surface-700 dark:text-surface-300">{items.length} items</span>
+		<span class="text-fluid-sm text-surface-600 dark:text-surface-400">{items.length} items</span>
 	</header>
 
 	<!-- Tabs -->
 	<div class="flex shrink-0 border-b border-surface-200 dark:border-surface-700">
-		<button onclick={() => (tab = 'agenda')} class="flex-1 py-2.5 text-center text-sm font-medium transition-colors {tab === 'agenda' ? 'border-b-2 border-mycelium-600 text-mycelium-700 dark:text-mycelium-300' : 'text-surface-700 dark:text-surface-300'}">Week</button>
-		<button onclick={() => (tab = 'tasks')} class="flex-1 py-2.5 text-center text-sm font-medium transition-colors {tab === 'tasks' ? 'border-b-2 border-mycelium-600 text-mycelium-700 dark:text-mycelium-300' : 'text-surface-700 dark:text-surface-300'}">All Tasks</button>
+		<button onclick={() => (tab = 'agenda')} style="min-height:var(--tap)" class="flex-1 text-fluid-sm font-medium transition-colors {tab === 'agenda' ? 'border-b-2 border-mycelium-600 text-mycelium-700 dark:text-mycelium-300' : 'text-surface-700 dark:text-surface-300'}">Week</button>
+		<button onclick={() => (tab = 'tasks')} style="min-height:var(--tap)" class="flex-1 text-fluid-sm font-medium transition-colors {tab === 'tasks' ? 'border-b-2 border-mycelium-600 text-mycelium-700 dark:text-mycelium-300' : 'text-surface-700 dark:text-surface-300'}">All Tasks</button>
 	</div>
 
-	{#if error}<div class="bg-red-50 px-4 py-2 text-sm text-red-600 dark:bg-red-950 dark:text-red-400">{error}</div>{/if}
+	{#if error}<div class="agenda-gutter bg-red-50 py-2 text-fluid-sm text-red-700 dark:bg-red-950 dark:text-red-300">{error}</div>{/if}
 
 	<div class="flex-1 overflow-y-auto">
+		<div class="agenda-width">
 		{#if tab === 'agenda'}
 			<!-- Weekly agenda -->
 			<div>
 				{#if overdueItems.length > 0}
-					<div class="border-b border-red-200 px-4 py-2 dark:border-red-900" style="background:#fef2f2">
-						<h3 class="mb-1.5 text-[11px] font-bold uppercase tracking-wide" style="color:#dc2626">Overdue ({overdueItems.length})</h3>
-						{#each overdueItems as item}
+					<div class="overdue-band agenda-gutter border-b border-surface-200 py-2 dark:border-surface-800">
+						<h3 class="overdue-band-title text-fluid-xs mb-1.5 font-bold uppercase tracking-wide">Overdue ({overdueItems.length})</h3>
+						{#each overdueItems as item (rowKey(item))}
 							{@render taskRow(item)}
 						{/each}
 					</div>
 				{/if}
 
-				{#each weekDays(today) as day}
+				{#each weekDays(today) as day (day.date)}
 					{@const dayItems = itemsForDate(day.date)}
-					<div class="border-b border-surface-100 px-4 py-2 dark:border-surface-800">
-						<h3 class="mb-1 text-[11px] font-bold uppercase tracking-wide {day.isToday ? 'text-mycelium-700 dark:text-mycelium-400' : 'text-surface-700 dark:text-surface-300'}">
-							{day.label} <span class="font-normal opacity-60">{day.date}</span>
+					<div class="agenda-gutter border-b border-surface-100 py-2 dark:border-surface-800">
+						<h3 class="text-fluid-xs mb-1 font-bold uppercase tracking-wide {day.isToday ? 'text-mycelium-700 dark:text-mycelium-400' : 'text-surface-600 dark:text-surface-400'}">
+							{day.label} <span class="font-normal opacity-70">{day.date}</span>
 						</h3>
 						{#if dayItems.length > 0}
-							{#each dayItems as di}
+							{#each dayItems as di (rowKey(di.node))}
 								{#if di.label}
 									<div class="flex items-start gap-1.5">
-										<span class="mt-1.5 shrink-0 rounded px-1 text-[10px] font-medium {di.reason === 'overdue-scheduled' ? 'bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400' : 'bg-orange-50 text-orange-600 dark:bg-orange-950 dark:text-orange-400'}">{di.label}</span>
+										<span class="state-chip state-deadline shrink-0" style="margin-top:calc(var(--row-min) / 4)">{di.label}</span>
 										<div class="min-w-0 flex-1">{@render taskRow(di.node)}</div>
 									</div>
 								{:else}
@@ -286,7 +361,7 @@
 								{/if}
 							{/each}
 						{:else}
-							<p class="py-0.5 text-[11px] text-surface-700/40 dark:text-surface-300/40">—</p>
+							<p class="text-fluid-xs py-0.5 text-surface-500 dark:text-surface-500">—</p>
 						{/if}
 					</div>
 				{/each}
@@ -294,108 +369,120 @@
 
 		{:else}
 			<!-- All tasks with search/filter -->
-			<div class="border-b border-surface-200 px-4 py-2 dark:border-surface-700">
+			<div class="agenda-gutter border-b border-surface-200 py-2 dark:border-surface-700">
 				<div class="flex gap-2">
 					<div class="relative flex-1">
-						<svg class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-surface-700 dark:text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-						<input type="text" bind:value={taskSearch} placeholder="Filter tasks..." class="w-full rounded-lg border border-surface-200 bg-surface-50 py-2 pl-8 pr-3 text-sm dark:border-surface-700 dark:bg-surface-900" />
+						<svg class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+						<input type="text" bind:value={taskSearch} placeholder="Filter tasks..." aria-label="Filter tasks by title" class="text-fluid-sm w-full rounded-lg border border-surface-200 bg-surface-50 pl-8 pr-3 dark:border-surface-700 dark:bg-surface-900" style="min-height:var(--tap)" />
 					</div>
-					<select bind:value={taskFilter} class="rounded-lg border border-surface-200 bg-surface-50 px-2 py-2 text-xs dark:border-surface-700 dark:bg-surface-900">
+					<select bind:value={taskFilter} aria-label="Filter by state" class="text-fluid-xs rounded-lg border border-surface-200 bg-surface-50 px-2 dark:border-surface-700 dark:bg-surface-900" style="min-height:var(--tap)">
 						<option value="all">All</option>
-						{#each orgConfig.todoKeywords as kw}<option value={kw}>{kw}</option>{/each}
-						{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
+						{@render keywordOptions()}
 					</select>
 				</div>
 			</div>
 
 			<div class="divide-y divide-surface-100 dark:divide-surface-800">
-				{#each filteredTasks as item}
-					<div class="px-4 py-1">
+				{#each filteredTasks as item (rowKey(item))}
+					<div class="agenda-gutter py-1">
 						{@render taskRow(item)}
 					</div>
 				{/each}
 			</div>
 			{#if filteredTasks.length === 0}
-				<p class="p-8 text-center text-sm text-surface-700 dark:text-surface-300">No matching tasks</p>
+				<p class="text-fluid-sm p-8 text-center text-surface-600 dark:text-surface-400">No matching tasks</p>
 			{/if}
 		{/if}
+		</div>
 	</div>
 
 	<MobileNav />
 </div>
 
+<!-- Keyword choices, grouped so the three categories are visible where states are picked. -->
+{#snippet keywordOptions()}
+	{#if orgConfig.todoKeywords.length > 0}
+		<optgroup label="Active">
+			{#each orgConfig.todoKeywords as kw}<option value={kw}>{kw}</option>{/each}
+		</optgroup>
+	{/if}
+	{#if orgConfig.waitingKeywords.length > 0}
+		<optgroup label="Waiting">
+			{#each orgConfig.waitingKeywords as kw}<option value={kw}>{kw}</option>{/each}
+		</optgroup>
+	{/if}
+	{#if orgConfig.doneKeywords.length > 0}
+		<optgroup label="Done">
+			{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
+		</optgroup>
+	{/if}
+{/snippet}
+
 {#snippet taskRow(item: HeadlineRecord)}
+	{@const key = rowKey(item)}
+	{@const busy = changingId === key}
+	{@const isOpen = openRow === key}
 	{@const dlDate = extractDate(item.deadline)}
 	{@const dlTime = extractTime(item.deadline)}
 	{@const scDate = extractDate(item.scheduled)}
 	{@const scTime = extractTime(item.scheduled)}
 	<div
-		style="position:relative;overflow:hidden;border-radius:8px"
-		ontouchstart={(e) => {
-			const el = (e.currentTarget as HTMLElement);
-			const inner = el.querySelector('[data-inner]') as HTMLElement;
-			const actions = el.querySelector('[data-actions]') as HTMLElement;
-			if (!inner || !actions) return;
-			const startX = e.touches[0].clientX;
-			let dx = 0;
-			const onMove = (ev: TouchEvent) => {
-				dx = startX - ev.touches[0].clientX;
-				const clamped = Math.max(-160, Math.min(0, -dx));
-				inner.style.transform = `translateX(${clamped}px)`;
-				actions.style.opacity = String(Math.min(1, Math.abs(clamped) / 80));
-			};
-			const onEnd = () => {
-				document.removeEventListener('touchmove', onMove);
-				document.removeEventListener('touchend', onEnd);
-				const open = dx > 60;
-				inner.style.transition = 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)';
-				actions.style.transition = 'opacity 0.25s ease';
-				inner.style.transform = open ? 'translateX(-160px)' : 'translateX(0)';
-				actions.style.opacity = open ? '1' : '0';
-				setTimeout(() => { inner.style.transition = ''; actions.style.transition = ''; }, 250);
-			};
-			document.addEventListener('touchmove', onMove, { passive: true });
-			document.addEventListener('touchend', onEnd);
-		}}
+		class="swipe-row"
+		style="position:relative;overflow:hidden;border-radius:0.5rem"
+		ontouchstart={(e) => onRowTouchStart(e, key)}
+		ontouchmove={onRowTouchMove}
+		ontouchend={onRowTouchEnd}
+		ontouchcancel={onRowTouchEnd}
 	>
-		<!-- Action buttons (fade in as user swipes) -->
-		<div data-actions style="position:absolute;right:0;top:0;bottom:0;display:flex;opacity:0">
-			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#dc2626;color:white;font-size:12px;font-weight:600;cursor:pointer;gap:2px">
+		<!-- Planning actions, revealed by swiping the row left -->
+		<div
+			data-actions
+			inert={!isOpen}
+			style="position:absolute;right:0;top:0;bottom:0;display:flex;opacity:{revealed(key)};transition:{dragRow === key ? 'none' : 'opacity 0.25s ease'}"
+		>
+			<label class="swipe-action swipe-action--deadline">
 				Deadline
-				<input type="datetime-local" value={dlDate && dlTime ? `${dlDate}T${dlTime}` : dlDate} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
-				<span style="font-size:10px;opacity:0.8">{dlDate ? (dlTime ? `${dlDate} ${dlTime}` : dlDate) : 'set'}</span>
+				<input type="datetime-local" tabindex={isOpen ? 0 : -1} aria-label="Deadline for {item.title ?? 'untitled task'}" value={dlDate && dlTime ? `${dlDate}T${dlTime}` : dlDate} onchange={(e) => setDate(item, 'DEADLINE', (e.target as HTMLInputElement).value || null)} />
+				<span>{dlDate ? (dlTime ? `${dlDate} ${dlTime}` : dlDate) : 'set'}</span>
 			</label>
-			<label style="width:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#2563eb;color:white;font-size:12px;font-weight:600;cursor:pointer;gap:2px">
+			<label class="swipe-action swipe-action--sched">
 				Schedule
-				<input type="datetime-local" value={scDate && scTime ? `${scDate}T${scTime}` : scDate} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} style="position:absolute;opacity:0;width:0;height:0" />
-				<span style="font-size:10px;opacity:0.8">{scDate ? (scTime ? `${scDate} ${scTime}` : scDate) : 'set'}</span>
+				<input type="datetime-local" tabindex={isOpen ? 0 : -1} aria-label="Scheduled date for {item.title ?? 'untitled task'}" value={scDate && scTime ? `${scDate}T${scTime}` : scDate} onchange={(e) => setDate(item, 'SCHEDULED', (e.target as HTMLInputElement).value || null)} />
+				<span>{scDate ? (scTime ? `${scDate} ${scTime}` : scDate) : 'set'}</span>
 			</label>
 		</div>
 
 		<!-- Main row -->
-		<div data-inner class="bg-surface-0 dark:bg-surface-950" style="position:relative;display:flex;align-items:center;gap:8px;padding:8px 4px;will-change:transform;{changingId === (item.node_id ?? `${item.file}:${item.line}`) ? 'opacity:0.5;' : ''}">
-			<select
-				value={item.todo ?? ''}
-				onchange={(e) => setState(item, (e.target as HTMLSelectElement).value || null)}
-				disabled={changingId === (item.node_id ?? `${item.file}:${item.line}`)}
-				style="height:28px;flex-shrink:0;border-radius:4px;border:0;padding:0 16px 0 4px;font-size:10px;font-weight:700;color:{isDone(item) ? '#16a34a' : item.todo ? '#dc2626' : '#6b7280'};background:{isDone(item) ? '#f0fdf4' : item.todo ? '#fef2f2' : 'transparent'}"
-			>
-				<option value="">None</option>
-				{#each orgConfig.todoKeywords as kw}<option value={kw}>{kw}</option>{/each}
-				{#each orgConfig.doneKeywords as kw}<option value={kw}>{kw}</option>{/each}
-			</select>
+		<div
+			class="swipe-inner bg-surface-0 dark:bg-surface-950 {dragRow === key ? '' : 'swipe-inner--settling'} {openRow === key && dragRow !== key ? 'swipe-inner--open' : ''}"
+			style="position:relative;display:flex;align-items:center;gap:0.5rem;padding:0.25rem;min-height:var(--row-min);will-change:transform;{dragRow === key ? `transform:translateX(${dragOffset}px);` : ''}{busy ? 'opacity:0.5;' : ''}"
+		>
+			<!-- State. The chip stays small; the select over it fills the tap target. -->
+			<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:var(--tap);min-height:var(--tap)">
+				<span class="state-chip {keywordCategoryClass(item.todo, orgConfig.categoryConfig)}">{item.todo ?? '—'}</span>
+				<select
+					class="tap-target"
+					aria-label="State for {item.title ?? 'untitled task'}"
+					value={item.todo ?? ''}
+					onchange={(e) => setState(item, (e.target as HTMLSelectElement).value || null)}
+					disabled={busy}
+				>
+					<option value="">None</option>
+					{@render keywordOptions()}
+				</select>
+			</span>
 
-			<button onclick={() => navigateToItem(item)} style="min-width:0;flex:1;text-align:left">
-				<div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{isDone(item) ? 'text-decoration:line-through;opacity:0.6' : 'font-weight:500'}">{item.title ?? 'Untitled'}</div>
+			<button onclick={() => activateRow(item)} style="min-width:0;flex:1;text-align:left;align-self:stretch;padding:0.375rem 0">
+				<div class="text-fluid-md" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{isDone(item) ? 'text-decoration:line-through;opacity:0.6' : 'font-weight:500'}">{item.title ?? 'Untitled'}</div>
 				{#if dlDate || scDate}
-					<div style="display:flex;gap:6px;font-size:10px;margin-top:2px;flex-wrap:wrap">
+					<div style="display:flex;gap:0.375rem;margin-top:0.2rem;flex-wrap:wrap">
 						{#if dlDate}
-							<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 4px;border-radius:3px;background:{isPastDue(item) ? '#fef2f2' : '#fff7ed'};color:{isPastDue(item) ? '#dc2626' : '#ea580c'}">
+							<span class="state-chip {isPastDue(item) ? 'state-overdue' : 'state-deadline'}">
 								<span style="font-weight:700">DL</span> {dlDate}{#if dlTime} {dlTime}{/if}
 							</span>
 						{/if}
 						{#if scDate}
-							<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 4px;border-radius:3px;background:#eff6ff;color:#2563eb">
+							<span class="state-chip state-sched">
 								<span style="font-weight:700">SC</span> {scDate}{#if scTime} {scTime}{/if}
 							</span>
 						{/if}
@@ -403,15 +490,20 @@
 				{/if}
 			</button>
 
-			<select
-				value={item.priority ?? ''}
-				onchange={(e) => setPriority(item, (e.target as HTMLSelectElement).value || null)}
-				disabled={changingId === (item.node_id ?? `${item.file}:${item.line}`)}
-				style="height:28px;flex-shrink:0;border-radius:4px;border:0;padding:0 12px 0 4px;font-size:10px;font-weight:700;color:#ea580c;{item.priority ? 'background:#fff7ed' : 'background:transparent'}"
-			>
-				<option value="">—</option>
-				{#each orgConfig.priorities as p}<option value={p}>#{p}</option>{/each}
-			</select>
+			<!-- Priority, same chip-over-target arrangement -->
+			<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:var(--tap);min-height:var(--tap)">
+				<span class="state-chip {item.priority ? 'state-priority' : 'state-none'}">{item.priority ? `#${item.priority}` : '—'}</span>
+				<select
+					class="tap-target"
+					aria-label="Priority for {item.title ?? 'untitled task'}"
+					value={item.priority ?? ''}
+					onchange={(e) => setPriority(item, (e.target as HTMLSelectElement).value || null)}
+					disabled={busy}
+				>
+					<option value="">None</option>
+					{#each orgConfig.priorities as p}<option value={p}>#{p}</option>{/each}
+				</select>
+			</span>
 		</div>
 	</div>
 {/snippet}

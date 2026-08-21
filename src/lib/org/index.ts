@@ -5,6 +5,7 @@ export * from './types';
 export * from './date';
 export * from './timestamp';
 export * from './headline';
+export * from './keyword';
 export * from './planning';
 export * from './repeater';
 export * from './checkbox';

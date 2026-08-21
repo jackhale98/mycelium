@@ -87,14 +87,45 @@ export function agendaReason(
 	return null;
 }
 
-/** Items belonging to one day's agenda block. */
+/**
+ * `true` when an item is already accounted for by the overdue block.
+ *
+ * Today's block and the overdue block are both driven off `today`, so without
+ * this every late task is drawn twice — once under "Overdue" and again under
+ * "Today" wearing a redundant "Sched. 10x" label.
+ */
+export function isOverdue<T extends AgendaItem>(
+	item: T,
+	today: string,
+	doneKeywords: readonly string[]
+): boolean {
+	if (isDone(item, doneKeywords)) return false;
+	const scheduled = timestampDate(item.scheduled);
+	const deadline = timestampDate(item.deadline);
+	return (
+		(scheduled !== null && compareDates(scheduled, today) < 0) ||
+		(deadline !== null && compareDates(deadline, today) < 0)
+	);
+}
+
+/**
+ * Items belonging to one day's agenda block.
+ *
+ * Pass `excludeOverdue` when the caller renders a separate overdue section, so
+ * a late task appears there and not a second time under today.
+ */
 export function itemsForDate<T extends AgendaItem>(
 	items: readonly T[],
 	date: string,
 	today: string,
-	doneKeywords: readonly string[]
+	doneKeywords: readonly string[],
+	excludeOverdue = false
 ): T[] {
-	return items.filter((item) => agendaReason(item, date, today, doneKeywords) !== null);
+	return items.filter((item) => {
+		if (agendaReason(item, date, today, doneKeywords) === null) return false;
+		if (excludeOverdue && date === today && isOverdue(item, today, doneKeywords)) return false;
+		return true;
+	});
 }
 
 /** Open items whose scheduled or deadline date has already passed. */
@@ -103,14 +134,7 @@ export function overdueItems<T extends AgendaItem>(
 	today: string,
 	doneKeywords: readonly string[]
 ): T[] {
-	return items.filter((item) => {
-		if (isDone(item, doneKeywords)) return false;
-		const scheduled = timestampDate(item.scheduled);
-		const deadline = timestampDate(item.deadline);
-		const overdueScheduled = scheduled !== null && compareDates(scheduled, today) < 0;
-		const overdueDeadline = deadline !== null && compareDates(deadline, today) < 0;
-		return overdueScheduled || overdueDeadline;
-	});
+	return items.filter((item) => isOverdue(item, today, doneKeywords));
 }
 
 /**

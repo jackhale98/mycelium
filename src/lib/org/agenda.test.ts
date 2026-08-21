@@ -9,6 +9,7 @@ import {
 	priorityRank,
 	sortTasks,
 	timestampDate,
+	isOverdue,
 } from './agenda';
 
 const DONE = ['DONE', 'CANCELLED'];
@@ -173,5 +174,40 @@ describe('sortTasks', () => {
 
 	it('compareTasks returns 0 for equivalent items', () => {
 		expect(compareTasks({ todo: 'TODO' }, { todo: 'TODO' })).toBe(0);
+	});
+});
+
+describe('overdue is counted once', () => {
+	const done = ['DONE'];
+	const today = '2026-08-20';
+
+	const lateScheduled = { todo: 'TODO', scheduled: '<2026-08-10 Mon>', deadline: null };
+	const lateDeadline = { todo: 'TODO', scheduled: null, deadline: '<2026-08-11 Tue>' };
+	const dueToday = { todo: 'TODO', scheduled: '<2026-08-20 Thu>', deadline: null };
+
+	it('recognises both flavours of late', () => {
+		expect(isOverdue(lateScheduled, today, done)).toBe(true);
+		expect(isOverdue(lateDeadline, today, done)).toBe(true);
+		expect(isOverdue(dueToday, today, done)).toBe(false);
+	});
+
+	it('a finished task is never overdue', () => {
+		expect(isOverdue({ todo: 'DONE', scheduled: '<2026-08-10 Mon>' }, today, done)).toBe(false);
+	});
+
+	it('regression: today no longer repeats what the overdue block already shows', () => {
+		const items = [lateScheduled, lateDeadline, dueToday];
+		expect(overdueItems(items, today, done)).toEqual([lateScheduled, lateDeadline]);
+		expect(itemsForDate(items, today, today, done, true)).toEqual([dueToday]);
+	});
+
+	it('without the flag both blocks still contain the late tasks', () => {
+		const items = [lateScheduled, lateDeadline, dueToday];
+		expect(itemsForDate(items, today, today, done, false)).toHaveLength(3);
+	});
+
+	it('only today is filtered — a future day is untouched', () => {
+		const soon = { todo: 'TODO', scheduled: null, deadline: '<2026-08-22 Sat>' };
+		expect(itemsForDate([soon], '2026-08-22', today, done, true)).toEqual([soon]);
 	});
 });

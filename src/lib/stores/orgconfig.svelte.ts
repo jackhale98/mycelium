@@ -1,8 +1,18 @@
 /// User-configurable org-mode settings: TODO keywords, priority levels
 /// Persisted to localStorage so they survive page reloads.
 
+import type { CategoryConfig, KeywordCategory } from '$lib/org';
+import { keywordCategory, notDoneKeywords, toKeywordConfig } from '$lib/org';
+import type { KeywordConfig } from '$lib/org';
+
 export interface OrgConfig {
 	todoKeywords: string[];
+	/**
+	 * Blocked states such as WAITING or HOLD. Org has no third state — these are
+	 * ordinary not-done keywords, split out only so the UI can colour them apart
+	 * from active work. They are sent to the parser alongside `todoKeywords`.
+	 */
+	waitingKeywords: string[];
 	doneKeywords: string[];
 	priorities: string[];
 }
@@ -11,6 +21,7 @@ export interface OrgConfig {
 // Users can add NEXT, WAITING, HOLD, CANCELLED etc. in settings.
 const DEFAULT_CONFIG: OrgConfig = {
 	todoKeywords: ['TODO'],
+	waitingKeywords: [],
 	doneKeywords: ['DONE'],
 	priorities: ['A', 'B', 'C'],
 };
@@ -55,6 +66,7 @@ export function validatePriorities(priorities: string[]): string | null {
 
 class OrgConfigStore {
 	todoKeywords = $state<string[]>(DEFAULT_CONFIG.todoKeywords);
+	waitingKeywords = $state<string[]>(DEFAULT_CONFIG.waitingKeywords);
 	doneKeywords = $state<string[]>(DEFAULT_CONFIG.doneKeywords);
 	priorities = $state<string[]>(DEFAULT_CONFIG.priorities);
 
@@ -67,16 +79,48 @@ class OrgConfigStore {
 					const todo = data.todoKeywords?.filter((k) => KEYWORD_PATTERN.test(k)) ?? [];
 					const done = data.doneKeywords?.filter((k) => KEYWORD_PATTERN.test(k)) ?? [];
 					const prio = data.priorities?.filter((p) => PRIORITY_PATTERN.test(p)) ?? [];
+					// Absent for configs saved before waiting states existed.
+					const waiting = data.waitingKeywords?.filter((k) => KEYWORD_PATTERN.test(k)) ?? [];
 					if (todo.length) this.todoKeywords = todo;
 					if (done.length) this.doneKeywords = done;
 					if (prio.length) this.priorities = prio;
+					// A keyword must not sit in two buckets; the active list wins.
+					this.waitingKeywords = waiting.filter((k) => !this.todoKeywords.includes(k) && !this.doneKeywords.includes(k));
 				}
 			} catch { /* ignore */ }
 		}
 	}
 
+	/** Not-done keywords, active before blocked — what org calls the TODO set. */
+	get notDoneKeywords(): string[] {
+		return notDoneKeywords(this.categoryConfig);
+	}
+
 	get allKeywords(): string[] {
-		return [...this.todoKeywords, ...this.doneKeywords];
+		return [...this.notDoneKeywords, ...this.doneKeywords];
+	}
+
+	/** The three-way split used for display. */
+	get categoryConfig(): CategoryConfig {
+		return {
+			todoKeywords: this.todoKeywords,
+			waitingKeywords: this.waitingKeywords,
+			doneKeywords: this.doneKeywords,
+		};
+	}
+
+	/**
+	 * The two-way split every function in `$lib/org` takes. Waiting keywords are
+	 * folded into `todoKeywords` here — to the parser they are not-done like any
+	 * other, and omitting them would make `* WAITING Ship it` parse as a title.
+	 */
+	get keywordConfig(): KeywordConfig {
+		return toKeywordConfig(this.categoryConfig);
+	}
+
+	/** How a keyword should be presented: todo, waiting, done or none. */
+	categoryOf(keyword: string | null | undefined): KeywordCategory {
+		return keywordCategory(keyword, this.categoryConfig);
 	}
 
 	/**
@@ -95,15 +139,17 @@ class OrgConfigStore {
 	 */
 	async update(config: Partial<OrgConfig>): Promise<void> {
 		const todo = config.todoKeywords ?? this.todoKeywords;
+		const waiting = config.waitingKeywords ?? this.waitingKeywords;
 		const done = config.doneKeywords ?? this.doneKeywords;
 		const prio = config.priorities ?? this.priorities;
 
-		const keywordError = validateKeywords([...todo, ...done]);
+		const keywordError = validateKeywords([...todo, ...waiting, ...done]);
 		if (keywordError) throw new Error(keywordError);
 		const priorityError = validatePriorities(prio);
 		if (priorityError) throw new Error(priorityError);
 
 		this.todoKeywords = todo;
+		this.waitingKeywords = waiting;
 		this.doneKeywords = done;
 		this.priorities = prio;
 		this.persist();
@@ -114,6 +160,7 @@ class OrgConfigStore {
 		if (typeof localStorage !== 'undefined') {
 			localStorage.setItem('mycelium-orgconfig', JSON.stringify({
 				todoKeywords: this.todoKeywords,
+				waitingKeywords: this.waitingKeywords,
 				doneKeywords: this.doneKeywords,
 				priorities: this.priorities,
 			}));

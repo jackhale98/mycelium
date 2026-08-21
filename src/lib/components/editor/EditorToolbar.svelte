@@ -105,7 +105,7 @@
 		style="-webkit-overflow-scrolling: touch; {keyboardOffset > 0 ? `position:fixed;bottom:${keyboardOffset}px;left:0;right:0;z-index:50;` : `flex-shrink:0;padding-bottom:env(safe-area-inset-bottom, 0px);`}"
 	>
 		<!-- Link (primary action) -->
-		<button onpointerdown={(e) => act(e, onLink)} title="Insert link (Cmd+K)" class="flex h-9 min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-semibold hover:bg-surface-200 dark:hover:bg-surface-700" style="color:#16a34a">Link</button>
+		<button onpointerdown={(e) => act(e, onLink)} title="Insert link (Cmd+K)" class="flex h-9 min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-semibold text-mycelium-700 hover:bg-surface-200 dark:text-mycelium-400 dark:hover:bg-surface-700">Link</button>
 
 		<div class="mx-0.5 h-6 w-px shrink-0 bg-surface-200 dark:bg-surface-700"></div>
 
@@ -124,16 +124,19 @@
 
 		<!-- TODO keyword picker -->
 		<div class="relative shrink-0">
-			<button onpointerdown={(e) => { e.preventDefault(); showTodoPicker = !showTodoPicker; }} title="Set TODO state" class="flex h-9 min-w-[44px] items-center justify-center rounded-md text-[10px] font-bold text-red-600 hover:bg-surface-200 dark:text-red-400 dark:hover:bg-surface-700">TODO</button>
+			<button onpointerdown={(e) => { e.preventDefault(); showTodoPicker = !showTodoPicker; }} title="Set TODO state" class="state-fg-todo flex h-9 min-w-[44px] items-center justify-center rounded-md text-[10px] font-bold hover:bg-surface-200 dark:hover:bg-surface-700">TODO</button>
 			{#if showTodoPicker}
 				<button class="fixed inset-0 z-20" onclick={() => (showTodoPicker = false)} aria-label="Close"></button>
 				<div style="{popupStyle}" class="z-[60] mb-1 min-w-[120px] rounded-lg border border-surface-200 bg-surface-0 py-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
-					<button onpointerdown={(e) => { e.preventDefault(); onTodo?.(null); showTodoPicker = false; }} class="flex w-full px-3 py-1.5 text-xs hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#6b7280">None</button>
+					<button onpointerdown={(e) => { e.preventDefault(); onTodo?.(null); showTodoPicker = false; }} class="state-fg-none flex w-full px-3 py-1.5 text-xs hover:bg-surface-100 dark:hover:bg-surface-800">None</button>
 					{#each orgConfig.todoKeywords as kw}
-						<button onpointerdown={(e) => { e.preventDefault(); onTodo?.(kw); showTodoPicker = false; }} class="flex w-full px-3 py-1.5 text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#dc2626">{kw}</button>
+						<button onpointerdown={(e) => { e.preventDefault(); onTodo?.(kw); showTodoPicker = false; }} class="state-fg-todo flex w-full px-3 py-1.5 text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800">{kw}</button>
+					{/each}
+					{#each orgConfig.waitingKeywords as kw}
+						<button onpointerdown={(e) => { e.preventDefault(); onTodo?.(kw); showTodoPicker = false; }} class="state-fg-waiting flex w-full px-3 py-1.5 text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800">{kw}</button>
 					{/each}
 					{#each orgConfig.doneKeywords as kw}
-						<button onpointerdown={(e) => { e.preventDefault(); onTodo?.(kw); showTodoPicker = false; }} class="flex w-full px-3 py-1.5 text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#16a34a">{kw}</button>
+						<button onpointerdown={(e) => { e.preventDefault(); onTodo?.(kw); showTodoPicker = false; }} class="state-fg-done flex w-full px-3 py-1.5 text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800">{kw}</button>
 					{/each}
 				</div>
 			{/if}
@@ -141,13 +144,13 @@
 
 		<!-- Priority picker -->
 		<div class="relative shrink-0">
-			<button onpointerdown={(e) => { e.preventDefault(); showPrioPicker = !showPrioPicker; }} title="Set priority" class="flex h-9 min-w-[36px] items-center justify-center rounded-md text-[10px] font-bold text-amber-600 hover:bg-surface-200 dark:text-amber-400 dark:hover:bg-surface-700">[#]</button>
+			<button onpointerdown={(e) => { e.preventDefault(); showPrioPicker = !showPrioPicker; }} title="Set priority" class="state-fg-priority flex h-9 min-w-[36px] items-center justify-center rounded-md text-[10px] font-bold hover:bg-surface-200 dark:hover:bg-surface-700">[#]</button>
 			{#if showPrioPicker}
 				<button class="fixed inset-0 z-20" onclick={() => (showPrioPicker = false)} aria-label="Close"></button>
 				<div style="{popupStyle}" class="z-[60] mb-1 flex gap-0.5 rounded-lg border border-surface-200 bg-surface-0 p-1 shadow-lg dark:border-surface-700 dark:bg-surface-900">
-					<button onpointerdown={(e) => { e.preventDefault(); onPriority?.(null); showPrioPicker = false; }} class="flex h-8 w-8 items-center justify-center rounded text-[10px] hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#6b7280">--</button>
+					<button onpointerdown={(e) => { e.preventDefault(); onPriority?.(null); showPrioPicker = false; }} class="state-fg-none flex h-8 w-8 items-center justify-center rounded text-[10px] hover:bg-surface-100 dark:hover:bg-surface-800">--</button>
 					{#each orgConfig.priorities as p}
-						<button onpointerdown={(e) => { e.preventDefault(); onPriority?.(p); showPrioPicker = false; }} class="flex h-8 w-8 items-center justify-center rounded text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800" style="color:#ea580c">#{p}</button>
+						<button onpointerdown={(e) => { e.preventDefault(); onPriority?.(p); showPrioPicker = false; }} class="state-fg-priority flex h-8 w-8 items-center justify-center rounded text-xs font-bold hover:bg-surface-100 dark:hover:bg-surface-800">#{p}</button>
 					{/each}
 				</div>
 			{/if}

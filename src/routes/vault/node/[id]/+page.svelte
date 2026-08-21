@@ -378,10 +378,10 @@
 
 
 	function keywordConfig(): KeywordConfig {
-		return {
-			todoKeywords: orgConfig?.todoKeywords ?? ['TODO'],
-			doneKeywords: orgConfig?.doneKeywords ?? ['DONE'],
-		};
+		// `orgConfig.keywordConfig` folds the waiting states into the not-done set.
+		// Building this by hand from `todoKeywords` alone would make a headline
+		// like `* WAITING Ship it` parse as a task titled "WAITING Ship it".
+		return orgConfig?.keywordConfig ?? { todoKeywords: ['TODO'], doneKeywords: ['DONE'] };
 	}
 
 	/** Split preserving the file's line endings, which `join` restores. */

@@ -18,34 +18,53 @@
 
 	// Editable copies of org config
 	let todoInput = $state(orgConfig.todoKeywords.join(', '));
+	let waitingInput = $state(orgConfig.waitingKeywords.join(', '));
 	let doneInput = $state(orgConfig.doneKeywords.join(', '));
 	let prioInput = $state(orgConfig.priorities.join(', '));
 
 	const todoList = $derived(parseConfigList(todoInput));
+	const waitingList = $derived(parseConfigList(waitingInput));
 	const doneList = $derived(parseConfigList(doneInput));
 	const prioList = $derived(parseConfigList(prioInput));
 
 	const todoError = $derived(validateKeywords(todoList));
+	const waitingError = $derived(validateKeywords(waitingList));
 	const doneError = $derived(validateKeywords(doneList));
 	const prioError = $derived(validatePriorities(prioList));
+	// A keyword in two categories has no defined colour, so reject it here
+	// rather than let one category silently win.
 	const keywordSetError = $derived(
 		todoList.length + doneList.length === 0
-			? 'At least one keyword is required.'
-			: todoError || doneError
+			? 'At least one active or done keyword is required.'
+			: todoError || waitingError || doneError
 				? null
-				: validateKeywords([...todoList, ...doneList])
+				: validateKeywords([...todoList, ...waitingList, ...doneList])
 	);
-	const orgConfigError = $derived(todoError ?? doneError ?? prioError ?? keywordSetError);
+	const orgConfigError = $derived(
+		todoError ?? waitingError ?? doneError ?? prioError ?? keywordSetError
+	);
+
+	/** Category swatches, so the colours are visible where they are configured. */
+	const previewRows = $derived([
+		{ label: 'Active', cls: 'state-todo', words: todoList },
+		{ label: 'Waiting', cls: 'state-waiting', words: waitingList },
+		{ label: 'Done', cls: 'state-done', words: doneList },
+	].filter((r) => r.words.length > 0));
 
 	async function saveOrgConfig() {
 		if (orgConfigError) return;
 
-		const prevKeywords = orgConfig.allKeywords.join(',');
-		const keywordsChanged = [...todoList, ...doneList].join(',') !== prevKeywords;
+		// Only the *set* of keywords affects the index. Moving a word between the
+		// active and waiting categories changes nothing on disk, so it must not
+		// trigger a full re-index.
+		const setOf = (words: string[]) => [...words].sort().join(',');
+		const keywordsChanged =
+			setOf([...todoList, ...waitingList, ...doneList]) !== setOf(orgConfig.allKeywords);
 
 		try {
 			await orgConfig.update({
 				todoKeywords: todoList,
+				waitingKeywords: waitingList,
 				doneKeywords: doneList,
 				priorities: prioList,
 			});
@@ -55,6 +74,7 @@
 		}
 
 		todoInput = orgConfig.todoKeywords.join(', ');
+		waitingInput = orgConfig.waitingKeywords.join(', ');
 		doneInput = orgConfig.doneKeywords.join(', ');
 		prioInput = orgConfig.priorities.join(', ');
 
@@ -273,12 +293,21 @@
 				</h2>
 				<div class="space-y-3">
 					<div>
-						<label for="todo-keywords" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">TODO Keywords</label>
-						<input id="todo-keywords" type="text" bind:value={todoInput} onblur={saveOrgConfig} aria-invalid={todoError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {todoError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="TODO, NEXT, WAITING" />
+						<label for="todo-keywords" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Active Keywords</label>
+						<input id="todo-keywords" type="text" bind:value={todoInput} onblur={saveOrgConfig} aria-invalid={todoError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {todoError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="TODO, NEXT" />
 						{#if todoError}
 							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{todoError}</p>
 						{:else}
-							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Active states, comma separated</p>
+							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Work you can start now, comma separated</p>
+						{/if}
+					</div>
+					<div>
+						<label for="waiting-keywords" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Waiting Keywords</label>
+						<input id="waiting-keywords" type="text" bind:value={waitingInput} onblur={saveOrgConfig} aria-invalid={waitingError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {waitingError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="WAITING, HOLD" />
+						{#if waitingError}
+							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{waitingError}</p>
+						{:else}
+							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Blocked on someone else. Still unfinished to org — these stay on the agenda, and only their colour differs.</p>
 						{/if}
 					</div>
 					<div>
@@ -287,7 +316,7 @@
 						{#if doneError}
 							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{doneError}</p>
 						{:else}
-							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Completion states, comma separated</p>
+							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Finished states, comma separated</p>
 						{/if}
 					</div>
 					<div>
@@ -299,6 +328,21 @@
 							<p class="mt-0.5 text-[10px] text-surface-700 dark:text-surface-300">Priority levels (highest first), comma separated</p>
 						{/if}
 					</div>
+					{#if previewRows.length > 0 && !orgConfigError}
+						<div class="rounded-lg border border-surface-200 p-3 dark:border-surface-700">
+							<p class="mb-2 text-[10px] font-medium uppercase tracking-wide text-surface-700 dark:text-surface-300">How they appear</p>
+							<div class="space-y-1.5">
+								{#each previewRows as row}
+									<div class="flex items-baseline gap-2">
+										<span class="w-14 shrink-0 text-[10px] text-surface-700 dark:text-surface-300">{row.label}</span>
+										<span class="flex flex-wrap gap-1">
+											{#each row.words as word}<span class="state-chip {row.cls}">{word}</span>{/each}
+										</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
 					{#if keywordSetError}
 						<p class="text-[11px] text-red-600 dark:text-red-400">{keywordSetError}</p>
 					{/if}
