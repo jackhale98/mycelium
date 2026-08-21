@@ -30,4 +30,5 @@ sha2 = { workspace = true }
 rusqlite = { workspace = true }
 notify = "7"
 regex-lite = "0.1"
+base64 = "0.22"
 tauri-plugin-folder-picker = { path = "../tauri-plugin-folder-picker" }

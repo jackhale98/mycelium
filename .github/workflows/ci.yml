@@ -16,6 +16,11 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # The mobile half of the folder-picker plugin is #[cfg(mobile)], so it
+          # is invisible to a host build. This target compiles it without needing
+          # an NDK, since that crate pulls in no C dependencies.
+          targets: aarch64-linux-android
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -64,3 +69,6 @@ jobs:
 
       - name: Check Tauri compilation
         run: cargo check -p mycelium
+
+      - name: Check mobile plugin compilation
+        run: cargo check -p tauri-plugin-folder-picker --target aarch64-linux-android

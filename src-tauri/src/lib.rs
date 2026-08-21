@@ -1,4 +1,6 @@
 mod commands;
+#[cfg(target_os = "android")]
+mod androidfs;
 mod fsutil;
 mod state;
 mod watcher;

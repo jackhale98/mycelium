@@ -49,6 +49,51 @@ impl<R: Runtime> FolderPicker<R> {
         }
     }
 
+    // ── Vault files ───────────────────────────────────────────────────
+    //
+    // Android only. On desktop and iOS the vault is a real directory and
+    // `db::NativeFs` answers these directly, so the handle is never consulted.
+
+    pub fn list_org_files(&self) -> crate::Result<ListFilesResponse> {
+        self.call("listOrgFiles", ())
+    }
+
+    pub fn read_file(&self, path: &str) -> crate::Result<ReadResponse> {
+        self.call("readFile", PathRequest { path: path.to_string() })
+    }
+
+    pub fn write_file(&self, path: &str, contents: String, id: &str) -> crate::Result<EmptyResponse> {
+        self.call(
+            "writeFile",
+            WriteRequest { path: path.to_string(), contents, id: id.to_string() },
+        )
+    }
+
+    pub fn delete_file(&self, path: &str) -> crate::Result<DeletedResponse> {
+        self.call("deleteFile", PathRequest { path: path.to_string() })
+    }
+
+    pub fn file_exists(&self, path: &str) -> crate::Result<ExistsResponse> {
+        self.call("fileExists", PathRequest { path: path.to_string() })
+    }
+
+    pub fn file_modified(&self, path: &str) -> crate::Result<ModifiedResponse> {
+        self.call("fileModified", PathRequest { path: path.to_string() })
+    }
+
+    pub fn create_directory(&self, path: &str) -> crate::Result<EmptyResponse> {
+        self.call("createDirectory", PathRequest { path: path.to_string() })
+    }
+
+    fn call<T, P>(&self, command: &str, payload: P) -> crate::Result<T>
+    where
+        T: DeserializeOwned,
+        P: serde::Serialize,
+    {
+        let handle = self.0.as_ref().ok_or(crate::Error::Unavailable)?;
+        handle.run_mobile_plugin(command, payload).map_err(Into::into)
+    }
+
     pub fn setup_toolbar(&self) -> crate::Result<PickFolderResponse> {
         match &self.0 {
             Some(handle) => handle
