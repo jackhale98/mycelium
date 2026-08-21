@@ -1,5 +1,4 @@
 use sha2::{Digest, Sha256};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -60,57 +59,9 @@ pub fn resolve_in_vault(vault_path: &Path, file_path: &str) -> Result<PathBuf, S
 
 /// Write a file atomically: temp file in the same directory, fsync, rename over
 /// the target. An interrupted write leaves the original file untouched.
+/// Replace a file's contents durably. See [`db::atomic::write`].
 pub fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| format!("Invalid file path: {}", path.display()))?;
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .ok_or_else(|| format!("Invalid file path: {}", path.display()))?;
-
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("Failed to create directory {}: {e}", dir.display()))?;
-
-    let tmp = dir.join(format!(
-        ".{file_name}.{}.tmp",
-        uuid::Uuid::new_v4().simple()
-    ));
-
-    let write_result = (|| -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("Failed to write file: {e}"));
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = std::fs::metadata(path) {
-            let mode = meta.permissions().mode();
-            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
-        }
-    }
-
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("Failed to write file: {e}"));
-    }
-
-    #[cfg(unix)]
-    {
-        if let Ok(dir_handle) = std::fs::File::open(dir) {
-            let _ = dir_handle.sync_all();
-        }
-    }
-
-    Ok(())
+    db::atomic::write(path, content.as_bytes())
 }
 
 /// Detect a supported image format from its leading bytes.
