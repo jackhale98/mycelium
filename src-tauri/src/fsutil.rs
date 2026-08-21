@@ -111,11 +111,6 @@ pub fn resolve_in_vault(vault_path: &Path, file_path: &str) -> Result<PathBuf, S
 
 /// Write a file atomically: temp file in the same directory, fsync, rename over
 /// the target. An interrupted write leaves the original file untouched.
-/// Replace a file's contents durably. See [`db::atomic::write`].
-pub fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
-    db::atomic::write(path, content.as_bytes())
-}
-
 /// Detect a supported image format from its leading bytes.
 /// Returns the canonical extension for the detected format.
 pub fn detect_image_kind(bytes: &[u8]) -> Option<&'static str> {
@@ -236,33 +231,6 @@ mod tests {
         let resolved = resolve_in_vault(&vault, &target.to_string_lossy()).unwrap();
         assert_eq!(resolved, target.canonicalize().unwrap());
         std::fs::remove_dir_all(&vault).unwrap();
-    }
-
-    #[test]
-    fn atomic_write_replaces_content_and_leaves_no_temp_files() {
-        let dir = tmp_dir("atomic");
-        let target = dir.join("note.org");
-        atomic_write(&target, "first").unwrap();
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "first");
-        atomic_write(&target, "second").unwrap();
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "second");
-
-        let leftovers: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
-            .collect();
-        assert!(leftovers.is_empty());
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn atomic_write_creates_missing_parent() {
-        let dir = tmp_dir("atomic-parent");
-        let target = dir.join("nested/note.org");
-        atomic_write(&target, "hello").unwrap();
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "hello");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

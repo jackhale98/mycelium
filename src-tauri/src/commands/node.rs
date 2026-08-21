@@ -1,3 +1,4 @@
+use crate::commands::editor::write_and_index;
 use crate::fsutil;
 use crate::state::AppState;
 use db::query;
@@ -78,9 +79,11 @@ pub async fn export_markdown(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let vault_path = state.vault_path()?;
-    let full_path = fsutil::resolve_in_vault(&vault_path, &file_path)?;
+    let key = fsutil::vault_key(&vault_path, &file_path)?;
 
-    let content = std::fs::read_to_string(&full_path)
+    let content = state
+        .vault_fs()
+        .read_to_string(&key)
         .map_err(|e| format!("Failed to read file: {e}"))?;
 
     let doc = org_parser::parse(&content);
@@ -94,9 +97,11 @@ pub async fn export_html(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let vault_path = state.vault_path()?;
-    let full_path = fsutil::resolve_in_vault(&vault_path, &file_path)?;
+    let key = fsutil::vault_key(&vault_path, &file_path)?;
 
-    let content = std::fs::read_to_string(&full_path)
+    let content = state
+        .vault_fs()
+        .read_to_string(&key)
         .map_err(|e| format!("Failed to read file: {e}"))?;
 
     let doc = org_parser::parse(&content);
@@ -122,13 +127,11 @@ pub async fn rename_node(
     let vault_path = state.vault_path()?;
 
     // 1. Update the title in the node's own file
-    let node_file = if std::path::PathBuf::from(&node.file).is_absolute() {
-        std::path::PathBuf::from(&node.file)
-    } else {
-        vault_path.join(&node.file)
-    };
+    let node_key = fsutil::vault_key(&vault_path, &node.file)?;
 
-    let content = std::fs::read_to_string(&node_file)
+    let content = state
+        .vault_fs()
+        .read_to_string(&node_key)
         .map_err(|e| format!("Failed to read file: {e}"))?;
 
     let new_content = if node.level == 0 {
@@ -137,14 +140,7 @@ pub async fn rename_node(
         update_headline_title(&content, &node_id, &new_title)
     };
 
-    fsutil::atomic_write(&node_file, &new_content)?;
-
-    let file_str = node_file.to_string_lossy().to_string();
-    state.note_own_write(&file_str, &fsutil::content_hash(&new_content));
-    state.with_db(|conn| {
-        db::index::index_file(conn, &file_str, &new_content)
-            .map_err(|e| format!("Failed to index: {e}"))
-    })?;
+    write_and_index(&state, &node_key, &new_content)?;
 
     // 2. Update link descriptions in all files that reference this node
     let backlinks = state.with_db(|conn| {
@@ -158,18 +154,18 @@ pub async fn rename_node(
     let replacement = format!("[[id:{node_id}][{new_title}]]");
     let mut failed: Vec<String> = Vec::new();
 
+    let vault_fs = state.vault_fs();
     for bl in &backlinks {
-        let bl_path = if std::path::PathBuf::from(&bl.source_file).is_absolute() {
-            std::path::PathBuf::from(&bl.source_file)
-        } else {
-            vault_path.join(&bl.source_file)
+        let bl_key = match fsutil::vault_key(&vault_path, &bl.source_file) {
+            Ok(key) => key,
+            Err(e) => { failed.push(format!("{}: {e}", bl.source_file)); continue; }
         };
 
-        if !bl_path.exists() { continue; }
+        if !vault_fs.exists(&bl_key) { continue; }
 
         // One unreadable or unwritable file must not abort the rename and leave the
         // vault half-updated; collect the failures and report them all at the end.
-        let bl_content = match std::fs::read_to_string(&bl_path) {
+        let bl_content = match vault_fs.read_to_string(&bl_key) {
             Ok(c) => c,
             Err(e) => { failed.push(format!("{}: {e}", bl.source_file)); continue; }
         };
@@ -181,18 +177,11 @@ pub async fn rename_node(
             .to_string();
         if new_bl_content == bl_content { continue; }
 
-        if let Err(e) = fsutil::atomic_write(&bl_path, &new_bl_content) {
+        // Same write-then-index the node's own file gets, rather than a second
+        // hand-rolled copy of it.
+        if let Err(e) = write_and_index(&state, &bl_key, &new_bl_content) {
             failed.push(format!("{}: {e}", bl.source_file));
             continue;
-        }
-
-        let bl_str = bl_path.to_string_lossy().to_string();
-        state.note_own_write(&bl_str, &fsutil::content_hash(&new_bl_content));
-        if let Err(e) = state.with_db(|conn| {
-            db::index::index_file(conn, &bl_str, &new_bl_content)
-                .map_err(|e| format!("Failed to index {}: {e}", bl.source_file))
-        }) {
-            failed.push(e);
         }
     }
 

@@ -188,9 +188,13 @@ pub async fn import_image(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let vault_path = state.vault_path()?;
-    let images_dir = vault_path.join("images");
-
-    std::fs::create_dir_all(&images_dir)
+    // The source is an arbitrary file the user picked from outside the vault, so
+    // it is read with std::fs; only the destination belongs to the vault and goes
+    // through its own file access.
+    let images_key = fsutil::vault_key(&vault_path, "images")?;
+    state
+        .vault_fs()
+        .create_dir_all(&images_key)
         .map_err(|e| format!("Failed to create images directory: {e}"))?;
 
     let source = PathBuf::from(&source_path);
@@ -214,10 +218,13 @@ pub async fn import_image(
         .filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric()))
         .unwrap_or_else(|| kind.to_string());
 
-    let dest_name = unique_image_name(&images_dir, &stem, &ext);
-    let dest = fsutil::resolve_in_vault(&vault_path, &format!("images/{dest_name}"))?;
+    let (dest_name, dest_key) = unique_image_key(&state, &vault_path, &stem, &ext)?;
 
-    std::fs::copy(&source, &dest).map_err(|e| format!("Failed to copy image: {e}"))?;
+    let bytes = std::fs::read(&source).map_err(|e| format!("Failed to read image: {e}"))?;
+    state
+        .vault_fs()
+        .write_bytes(&dest_key, &bytes)
+        .map_err(|e| format!("Failed to copy image: {e}"))?;
 
     Ok(format!("images/{dest_name}"))
 }
@@ -253,14 +260,35 @@ fn sanitize_file_stem(stem: &str) -> String {
     }
 }
 
-fn unique_image_name(images_dir: &Path, stem: &str, ext: &str) -> String {
-    let mut name = format!("{stem}.{ext}");
-    let mut counter = 1;
-    while images_dir.join(&name).exists() {
-        name = format!("{stem}-{counter}.{ext}");
-        counter += 1;
+/// A free name under `images/`, with the vault key that addresses it.
+///
+/// Asks the vault whether a name is taken rather than the filesystem, so this
+/// works against a Storage Access Framework tree as well as a directory.
+fn unique_image_key(
+    state: &AppState,
+    vault_path: &Path,
+    stem: &str,
+    ext: &str,
+) -> Result<(String, String), String> {
+    let fs = state.vault_fs();
+    for counter in 0..1000 {
+        let name = image_file_name(stem, ext, counter);
+        let key = fsutil::vault_key(vault_path, &format!("images/{name}"))?;
+        if !fs.exists(&key) {
+            return Ok((name, key));
+        }
     }
-    name
+    Err(format!("could not find a free name for {stem}.{ext}"))
+}
+
+/// The `counter`-th candidate name for an imported image. The first carries no
+/// suffix, so a single paste keeps the name the user recognises.
+pub fn image_file_name(stem: &str, ext: &str, counter: u32) -> String {
+    if counter == 0 {
+        format!("{stem}.{ext}")
+    } else {
+        format!("{stem}-{counter}.{ext}")
+    }
 }
 
 /// Build a non-colliding `YYYYMMDDHHmmss-slug.org` path inside `dir`.
@@ -433,17 +461,20 @@ mod tests {
     }
 
     #[test]
-    fn imported_image_names_are_sanitized_and_deduplicated() {
-        let dir = tmp_dir("images");
+    fn imported_image_stems_are_sanitized() {
+        // A pasted file's name is attacker-shaped input: it decides where the
+        // copy lands inside the vault.
         assert_eq!(sanitize_file_stem("../../etc/passwd"), "etc-passwd");
         assert_eq!(sanitize_file_stem(""), "image");
+    }
 
-        let first = unique_image_name(&dir, "photo", "png");
-        std::fs::write(dir.join(&first), "x").unwrap();
-        let second = unique_image_name(&dir, "photo", "png");
-        assert_eq!(first, "photo.png");
-        assert_eq!(second, "photo-1.png");
-        std::fs::remove_dir_all(&dir).unwrap();
+    #[test]
+    fn imported_image_names_deduplicate() {
+        // The first paste keeps the name the user recognises; later ones are
+        // suffixed rather than overwriting it.
+        assert_eq!(image_file_name("photo", "png", 0), "photo.png");
+        assert_eq!(image_file_name("photo", "png", 1), "photo-1.png");
+        assert_eq!(image_file_name("photo", "png", 2), "photo-2.png");
     }
 
     #[test]
