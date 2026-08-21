@@ -201,13 +201,20 @@ What the app does to your working tree:
 
 ### Recommended `.gitignore`
 
-Interrupted writes can leave a temp file behind — the app clears stale ones when
-it opens a vault, but git does not ignore dotfiles, so add:
+A note is written to a temporary file beside it and renamed into place. An
+interrupted write can leave one behind — Mycelium resolves them when it next
+opens the vault, restoring a complete note whose save did not finish and
+discarding a partial one — but git does not ignore dotfiles, so add:
 
 ```gitignore
-# Mycelium: temp files from an interrupted write
-.*.[0-9a-f][0-9a-f]*.tmp
+# Mycelium: temporaries from an interrupted write
+.*.part
+.*.ready
 ```
+
+A `.ready` that survives means a note could not be restored automatically,
+because the file it belonged to changed in the meantime. It holds your
+unsaved edit; compare it with the note by hand before deleting it.
 
 ## Database Schema
 

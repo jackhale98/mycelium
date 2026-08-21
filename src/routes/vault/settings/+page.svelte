@@ -2,6 +2,7 @@
 	import { navigation } from '$lib/stores/navigation.svelte';
 	import { vault } from '$lib/stores/vault.svelte';
 	import { theme, type ThemeMode } from '$lib/stores/theme.svelte';
+	import { prefs, type SaveMode } from '$lib/stores/prefs.svelte';
 	import { syncVault, rebuildDatabase, listFiles, listNodes } from '$lib/tauri/commands';
 	import type { SyncResult } from '$lib/types/vault';
 	import {
@@ -173,6 +174,11 @@
 		navigation.navigateHome();
 	}
 
+	const saveOptions: { value: SaveMode; label: string; hint: string }[] = [
+		{ value: 'auto', label: 'While typing', hint: 'Saves 1.5s after you stop. Best for most vaults.' },
+		{ value: 'manual', label: 'When I ask', hint: 'Saves on the Save button. Keeps a git working tree still.' },
+	];
+
 	const themeOptions: { value: ThemeMode; label: string; icon: string }[] = [
 		{ value: 'light', label: 'Light', icon: '\u2600' },
 		{ value: 'dark', label: 'Dark', icon: '\u263E' },
@@ -284,6 +290,31 @@
 						</button>
 					{/each}
 				</div>
+			</section>
+
+			<!-- Saving -->
+			<section class="rounded-xl border border-surface-200 p-4 dark:border-surface-700">
+				<h2 class="mb-3 text-sm font-semibold uppercase text-surface-700 dark:text-surface-300">
+					Saving
+				</h2>
+				<div class="flex gap-2">
+					{#each saveOptions as opt}
+						<button
+							onclick={() => prefs.setSaveMode(opt.value)}
+							class="flex flex-1 flex-col items-start gap-1 rounded-lg border px-3 py-3 text-left transition-colors {prefs.saveMode === opt.value
+								? 'border-mycelium-500 bg-mycelium-50 dark:bg-mycelium-950'
+								: 'border-surface-200 hover:bg-surface-100 dark:border-surface-700 dark:hover:bg-surface-800'}"
+						>
+							<span class="text-sm font-medium {prefs.saveMode === opt.value ? 'text-mycelium-700 dark:text-mycelium-300' : ''}">{opt.label}</span>
+							<span class="text-[10px] leading-snug text-surface-700 dark:text-surface-300">{opt.hint}</span>
+						</button>
+					{/each}
+				</div>
+				<p class="mt-2 text-[11px] text-surface-700 dark:text-surface-300">
+					Either way, leaving a note or switching away from the app saves it — the
+					system can close Mycelium at any time, and unsaved edits should not be
+					lost because of it.
+				</p>
 			</section>
 
 			<!-- Org Mode Configuration -->

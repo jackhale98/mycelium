@@ -1,4 +1,3 @@
-use crate::fsutil;
 use crate::state::AppState;
 use crate::watcher;
 use db::sync;
@@ -19,12 +18,24 @@ pub async fn open_vault(
         return Err(format!("Not a directory: {path}"));
     }
 
-    // Clear temp files an interrupted write left behind before indexing, so they
-    // never reach the user's git status. An hour is far longer than any write
-    // takes, so a write in flight is never disturbed.
-    let swept = fsutil::sweep_stale_temp_files(&vault_path, Duration::from_secs(3600));
-    if swept > 0 {
-        eprintln!("Removed {swept} leftover temp file(s) from a previous run");
+    // Resolve anything an interrupted write left behind before indexing, so a
+    // recovered note is picked up by the scan that follows and no temporary
+    // reaches the user's git status. An hour is far longer than any write takes,
+    // so a write in flight is never disturbed.
+    let report = db::sweep(&vault_path, Duration::from_secs(3600));
+    if !report.is_empty() {
+        for path in &report.recovered {
+            eprintln!("Recovered an unsaved note from a previous run: {path}");
+        }
+        for path in &report.conflicted {
+            eprintln!(
+                "An unsaved note from a previous run could not be restored because \
+                 the file changed since: {path}"
+            );
+        }
+        if report.discarded > 0 {
+            eprintln!("Discarded {} incomplete temp file(s)", report.discarded);
+        }
     }
 
     // Open database

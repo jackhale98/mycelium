@@ -17,6 +17,7 @@
 	import MobileNav from '$lib/components/common/MobileNav.svelte';
 	import type { NodeRecord, BacklinkRecord, ForwardLink, SearchResult } from '$lib/types/node';
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
+	import { prefs } from '$lib/stores/prefs.svelte';
 	import {
 		applyRepeaterOnDone, getPlanning, getTodoKeyword, isDoneKeyword, nextTodoKeyword,
 		setClosed, setPlanningDate, setPriority, setTodoKeyword, removePlanning,
@@ -45,9 +46,14 @@
 	let contentEl: HTMLDivElement;
 	let conflict = $state<string | null>(null);
 
-	// Auto-save debounce
+	// Auto-save debounce. Skipped in manual mode, which exists so a vault under
+	// version control is not rewritten every 1.5s while you type. The flushes on
+	// navigation and on `pagehide` below still run in both modes: the OS can end
+	// the process at any moment, and losing what someone typed is worse than a
+	// write they did not ask for.
 	$effect(() => {
 		const _ = editor.content;
+		if (!prefs.autoSaves) return;
 		if (editor.isDirty && editor.filePath) {
 			clearTimeout(autoSaveTimer);
 			autoSaveTimer = setTimeout(() => handleSave(), 1500);

@@ -1,6 +1,5 @@
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
 
 pub const OUTSIDE_VAULT: &str = "File path is outside the vault directory.";
 
@@ -108,118 +107,9 @@ pub fn detect_image_kind(bytes: &[u8]) -> Option<&'static str> {
     None
 }
 
-/// `true` for a name `atomic_write` would have produced: `.<name>.<uuid>.tmp`.
-fn is_atomic_temp_name(name: &str) -> bool {
-    if !name.starts_with('.') {
-        return false;
-    }
-    let Some(rest) = name.strip_suffix(".tmp") else {
-        return false;
-    };
-    let Some((prefix, uuid)) = rest.rsplit_once('.') else {
-        return false;
-    };
-    // `.tmp` alone is somebody else's file; ours always names its target.
-    !prefix.is_empty()
-        && uuid.len() == 32
-        && uuid.bytes().all(|b| b.is_ascii_hexdigit())
-}
-
-/// Delete temp files an interrupted `atomic_write` left behind.
-///
-/// The rename that publishes a write is atomic, but the process can die between
-/// creating the temp file and renaming it — iOS terminates backgrounded apps
-/// routinely. The leftover is a dotfile, and git does *not* ignore dotfiles, so
-/// it would surface in the user's working tree as an untracked file.
-///
-/// Only files older than `min_age` are removed, so a write in flight — in this
-/// process or another copy of the app — is never pulled out from under itself.
-/// Returns the number removed; failures are skipped rather than reported, since
-/// this is opportunistic cleanup and must not block opening a vault.
-pub fn sweep_stale_temp_files(root: &Path, min_age: Duration) -> usize {
-    fn sweep(dir: &Path, min_age: Duration, now: SystemTime, removed: &mut usize) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            let name = entry.file_name().to_string_lossy().to_string();
-
-            if file_type.is_dir() {
-                // Same directories the indexer skips, for the same reasons.
-                if !db::is_ignored_dir(&name) {
-                    sweep(&path, min_age, now, removed);
-                }
-                continue;
-            }
-            if !file_type.is_file() || !is_atomic_temp_name(&name) {
-                continue;
-            }
-            let old_enough = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .map(|modified| {
-                    now.duration_since(modified).unwrap_or(Duration::ZERO) >= min_age
-                })
-                .unwrap_or(false);
-            if old_enough && std::fs::remove_file(&path).is_ok() {
-                *removed += 1;
-            }
-        }
-    }
-
-    let mut removed = 0;
-    sweep(root, min_age, SystemTime::now(), &mut removed);
-    removed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn temp_name_matches_only_our_own_writes() {
-        assert!(is_atomic_temp_name(
-            ".inbox.org.0123456789abcdef0123456789abcdef.tmp"
-        ));
-        assert!(!is_atomic_temp_name("inbox.org"));
-        assert!(!is_atomic_temp_name("notes.tmp"));
-        assert!(!is_atomic_temp_name(".vim.tmp"));
-        assert!(!is_atomic_temp_name(
-            ".0123456789abcdef0123456789abcdef.tmp"
-        ));
-        assert!(!is_atomic_temp_name(".inbox.org.short.tmp"));
-    }
-
-    #[test]
-    fn sweep_removes_stale_temp_files_only() {
-        let dir = tmp_dir("sweep");
-        std::fs::create_dir_all(dir.join(".git")).unwrap();
-
-        let stale = dir.join(".inbox.org.0123456789abcdef0123456789abcdef.tmp");
-        let fresh = dir.join(".daily.org.fedcba9876543210fedcba9876543210.tmp");
-        let note = dir.join("keep.org");
-        let in_git = dir.join(".git/.x.org.0123456789abcdef0123456789abcdef.tmp");
-        for path in [&stale, &fresh, &note, &in_git] {
-            std::fs::write(path, "x").unwrap();
-        }
-
-        // Nothing is old enough yet, so a write in flight is left alone.
-        assert_eq!(sweep_stale_temp_files(&dir, Duration::from_secs(3600)), 0);
-        assert!(stale.exists());
-
-        // With no age floor the stale file goes and everything else stays.
-        assert_eq!(sweep_stale_temp_files(&dir, Duration::ZERO), 2);
-        assert!(!stale.exists());
-        assert!(!fresh.exists());
-        assert!(note.exists(), "deleted a real note");
-        assert!(in_git.exists(), "reached into .git");
-
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
 
     fn tmp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

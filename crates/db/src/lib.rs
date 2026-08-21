@@ -2,6 +2,7 @@ pub mod atomic;
 pub mod index;
 pub mod query;
 pub mod schema;
+pub mod sweep;
 pub mod sync;
 pub mod vaultfs;
 
@@ -12,6 +13,7 @@ pub use query::{
 };
 pub use schema::{check_fts_integrity, rebuild_fts, repair_fts, reset_database};
 pub use sync::{is_ignored_dir, IGNORED_DIRS};
+pub use sweep::{sweep, SweepReport};
 pub use vaultfs::{NativeFs, VaultDirEntry, VaultEntry, VaultFs, VaultFsError};
 pub use sync::{SyncError, SyncResult};
 
