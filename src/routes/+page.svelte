@@ -118,15 +118,10 @@
 				console.warn('Folder picker plugin failed:', e);
 			}
 
-			// Android has no folder picker yet: the file dialog returns a content://
-			// URI that the indexer cannot read, so say so instead of failing later
-			// with a confusing error.
-			if (isAndroid()) {
-				error =
-					'Choosing a vault folder is not supported on Android yet. Type the full path to your vault below, or browse for it.';
-				showFolderBrowser = true;
-				return;
-			}
+			// Android returns a Storage Access Framework tree rather than a path, and
+			// the branch above has already taken it. Reaching here means the user
+			// dismissed the picker, so there is nothing to report.
+			if (isAndroid()) return;
 
 			// Fallback: file picker (limited to single file access)
 			try {

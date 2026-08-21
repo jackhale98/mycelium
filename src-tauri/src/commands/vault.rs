@@ -14,16 +14,20 @@ pub async fn open_vault(
     state: State<'_, AppState>,
 ) -> Result<sync::SyncResult, String> {
     let vault_path = PathBuf::from(&path);
-
-    if !vault_path.is_dir() {
-        return Err(format!("Not a directory: {path}"));
-    }
+    validate_vault_location(&path)?;
 
     // Resolve anything an interrupted write left behind before indexing, so a
     // recovered note is picked up by the scan that follows and no temporary
     // reaches the user's git status. An hour is far longer than any write takes,
     // so a write in flight is never disturbed.
+    //
+    // The sweep walks with std::fs, so it only applies where the vault is a real
+    // directory. An Android vault can still be left with temporaries; recovering
+    // those needs a walk through the plugin and is not wired up yet.
+    #[cfg(not(target_os = "android"))]
     let report = db::sweep(&vault_path, Duration::from_secs(3600));
+    #[cfg(target_os = "android")]
+    let report = db::SweepReport::default();
     if !report.is_empty() {
         for path in &report.recovered {
             eprintln!("Recovered an unsaved note from a previous run: {path}");
@@ -154,4 +158,28 @@ fn vault_fs_for<R: tauri::Runtime>(app: &AppHandle<R>) -> Arc<dyn db::VaultFs> {
 #[cfg(not(target_os = "android"))]
 fn vault_fs_for<R: tauri::Runtime>(_app: &AppHandle<R>) -> Arc<dyn db::VaultFs> {
     Arc::new(db::NativeFs)
+}
+
+/// Reject a vault location that clearly cannot be opened, before any work.
+///
+/// Natively that means it has to be a directory. On Android the user grants a
+/// Storage Access Framework tree and the app is handed a `content://` URI, which
+/// no filesystem call can inspect — so the check is that it is such a URI at
+/// all, which also catches a path left over from before the picker existed.
+#[cfg(not(target_os = "android"))]
+fn validate_vault_location(path: &str) -> Result<(), String> {
+    if !PathBuf::from(path).is_dir() {
+        return Err(format!("Not a directory: {path}"));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+fn validate_vault_location(path: &str) -> Result<(), String> {
+    if !path.starts_with("content://") {
+        return Err(format!(
+            "This vault was saved before Android could choose folders. Pick your vault folder again: {path}"
+        ));
+    }
+    Ok(())
 }

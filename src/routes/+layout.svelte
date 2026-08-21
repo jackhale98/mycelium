@@ -5,6 +5,7 @@
 	import { theme } from '$lib/stores/theme.svelte';
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 	import { resyncIfChanged } from '$lib/vault/resync';
+	import { installBackHandler } from '$lib/vault/back';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -24,6 +25,10 @@
 		// Install native keyboard toolbar (iOS + Android)
 		setupNativeToolbar();
 
+		// Answer the Android system back press. Harmless elsewhere: nothing calls
+		// the hook on platforms that have no system back.
+		const removeBackHandler = installBackHandler();
+
 		// Pick up edits made while the app was in the background — a git client
 		// syncing the folder, another device, a desktop Emacs. `visibilitychange`
 		// is the signal iOS actually delivers when returning from another app;
@@ -38,6 +43,7 @@
 		window.addEventListener('focus', onForeground);
 
 		return () => {
+			removeBackHandler();
 			document.removeEventListener('visibilitychange', onForeground);
 			window.removeEventListener('focus', onForeground);
 			mq.removeEventListener('change', handler);
