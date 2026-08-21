@@ -352,8 +352,8 @@
 						{#if dayItems.length > 0}
 							{#each dayItems as di (rowKey(di.node))}
 								{#if di.label}
-									<div class="flex items-start gap-1.5">
-										<span class="state-chip state-deadline shrink-0" style="margin-top:calc(var(--row-min) / 4)">{di.label}</span>
+									<div class="flex items-center gap-1.5">
+										<span class="state-chip state-deadline shrink-0">{di.label}</span>
 										<div class="min-w-0 flex-1">{@render taskRow(di.node)}</div>
 									</div>
 								{:else}
@@ -458,7 +458,7 @@
 			style="position:relative;display:flex;align-items:center;gap:0.5rem;padding:0.25rem;min-height:var(--row-min);will-change:transform;{dragRow === key ? `transform:translateX(${dragOffset}px);` : ''}{busy ? 'opacity:0.5;' : ''}"
 		>
 			<!-- State. The chip stays small; the select over it fills the tap target. -->
-			<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:var(--tap);min-height:var(--tap)">
+			<span class="tap-wrap">
 				<span class="state-chip {keywordCategoryClass(item.todo, orgConfig.categoryConfig)}">{item.todo ?? '—'}</span>
 				<select
 					class="tap-target"
@@ -491,7 +491,7 @@
 			</button>
 
 			<!-- Priority, same chip-over-target arrangement -->
-			<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:var(--tap);min-height:var(--tap)">
+			<span class="tap-wrap">
 				<span class="state-chip {item.priority ? 'state-priority' : 'state-none'}">{item.priority ? `#${item.priority}` : '—'}</span>
 				<select
 					class="tap-target"

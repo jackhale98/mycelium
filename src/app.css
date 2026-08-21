@@ -142,8 +142,26 @@ html.dark {
 }
 .overdue-band-title { color: var(--state-overdue-fg); }
 
-/* A control sized for touch (44px) whose visible chip stays small: the
-   <select> is laid over the chip rather than being the chip. */
+/* A control sized for touch whose visible chip stays small: the <select> is
+   laid over the chip rather than being the chip. */
+.tap-wrap {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	min-width: var(--tap);
+	min-height: var(--tap);
+	border-radius: 0.4rem;
+}
+/* The ring goes on the wrapper. Putting it on the control and un-hiding the
+   control to show it would expose the native select: iOS matches
+   :focus-visible on touch, so a tap rendered the selected keyword at the
+   platform's own size and colour on top of the chip. */
+.tap-wrap:focus-within {
+	outline: 2px solid var(--color-mycelium-600);
+	outline-offset: 1px;
+}
 .tap-target {
 	position: absolute;
 	top: 50%;
@@ -153,15 +171,19 @@ html.dark {
 	height: 100%;
 	min-width: var(--tap);
 	min-height: var(--tap);
-	opacity: 0;
 	appearance: none;
 	border: 0;
 	background: transparent;
+	/* Invisible three ways over, so no platform styling of the control can
+	   surface through it in any state. */
+	opacity: 0;
+	color: transparent;
+	-webkit-tap-highlight-color: transparent;
 }
+.tap-target:focus,
 .tap-target:focus-visible {
-	opacity: 1;
-	outline: 2px solid var(--color-mycelium-600);
-	outline-offset: 1px;
+	opacity: 0;
+	outline: none;
 }
 
 /* Rows own their horizontal gesture; the browser keeps vertical scrolling. */
