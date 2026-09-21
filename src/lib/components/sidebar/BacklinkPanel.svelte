@@ -66,11 +66,11 @@
 							<div class="flex items-center gap-2">
 								<span class="font-medium text-sm">{bl.source_title ?? bl.source_file.split('/').pop()}</span>
 								{#if bl.occurrences > 1}
-									<!-- The note is listed once; this is what it would have been
-									     repeated for. -->
+									<!-- Mentions sharing a line share this preview, so they are
+									     one entry rather than repeated identical ones. -->
 									<span
 										class="shrink-0 rounded-full bg-surface-100 px-1.5 py-0.5 text-[10px] font-medium text-surface-600 dark:bg-surface-800 dark:text-surface-400"
-										title="Links here {bl.occurrences} times"
+										title="{bl.occurrences} mentions on this line"
 									>×{bl.occurrences}</span>
 								{/if}
 							</div>
@@ -80,7 +80,7 @@
 								</p>
 							{/if}
 							<p class="mt-1 text-[10px] text-surface-700/50 dark:text-surface-300/50">
-								{bl.source_file.split('/').pop()}
+								{bl.source_file.split('/').pop()}{#if bl.line} · line {bl.line}{/if}
 							</p>
 						</button>
 					</li>

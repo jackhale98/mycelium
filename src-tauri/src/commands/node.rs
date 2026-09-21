@@ -25,7 +25,12 @@ pub async fn get_backlinks(
     node_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<query::BacklinkRecord>, String> {
-    state.with_db(|conn| query::get_backlinks(conn, &node_id).map_err(|e| e.to_string()))
+    // Read previews through the vault's own file access: an Android vault has no
+    // path std::fs could open, and the previews would come back empty.
+    let vault_fs = state.vault_fs();
+    state.with_db(|conn| {
+        query::get_backlinks_with(conn, &node_id, vault_fs.as_ref()).map_err(|e| e.to_string())
+    })
 }
 
 /// Get forward links from a node

@@ -441,34 +441,37 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 
 	get_node: (args) => MOCK_NODES.find(n => n.id === args.id) ?? null,
 
-	// Backlinks: which notes link TO this one. Grouped per note, like the real
-	// query — one row per link occurrence would repeat the same note.
+	// Backlinks: one entry per mention, carrying the line it sits on — the same
+	// shape the real query returns. Mentions sharing a line are one entry, since
+	// they share the preview.
 	get_backlinks: (args) => {
 		const targetId = args.nodeId as string;
-		const inbound = ALL_LINKS.filter(l => l.targetNodeId === targetId);
+		const sources = [...new Set(
+			ALL_LINKS.filter(l => l.targetNodeId === targetId).map(l => l.sourceNodeId)
+		)];
 
-		const bySource = new Map<string, BacklinkRecord>();
-		for (const l of inbound) {
-			const existing = bySource.get(l.sourceNodeId);
-			if (existing) {
-				existing.occurrences += 1;
-				continue;
-			}
-			const sourceNode = MOCK_NODES.find(n => n.id === l.sourceNodeId);
-			// Extract the actual line containing the link for context
-			const fileContent = FILES[l.sourceFile] ?? '';
-			const contextLine = fileContent.split('\n').find(line => line.includes(`[[id:${targetId}`));
+		const out: BacklinkRecord[] = [];
+		for (const sourceId of sources) {
+			const link = ALL_LINKS.find(l => l.sourceNodeId === sourceId && l.targetNodeId === targetId);
+			if (!link) continue;
+			const sourceNode = MOCK_NODES.find(n => n.id === sourceId);
+			const lines = (FILES[link.sourceFile] ?? '').split('\n');
 
-			bySource.set(l.sourceNodeId, {
-				source_id: l.sourceNodeId,
-				source_title: sourceNode?.title ?? null,
-				source_file: l.sourceFile,
-				link_type: 'id',
-				context: contextLine?.trim() ?? null,
-				occurrences: 1,
+			lines.forEach((text, i) => {
+				const mentions = text.split(`[[id:${targetId}`).length - 1;
+				if (mentions === 0) return;
+				out.push({
+					source_id: sourceId,
+					source_title: sourceNode?.title ?? null,
+					source_file: link.sourceFile,
+					link_type: 'id',
+					context: text.trim(),
+					line: i + 1,
+					occurrences: mentions,
+				});
 			});
 		}
-		return [...bySource.values()];
+		return out;
 	},
 
 	// Forward links: which notes this one links to, grouped per destination.

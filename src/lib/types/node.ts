@@ -18,7 +18,9 @@ export interface BacklinkRecord {
 	source_file: string;
 	link_type: string;
 	context: string | null;
-	/** How many times that note links here. One entry is returned per note. */
+	/** 1-based line the mention sits on; null when the file could not be read. */
+	line: number | null;
+	/** Mentions sharing this line — two links on one line are one entry. */
 	occurrences: number;
 }
 

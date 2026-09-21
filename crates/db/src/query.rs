@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -61,9 +62,11 @@ pub struct BacklinkRecord {
     pub source_file: String,
     pub link_type: String,
     pub context: Option<String>,
-    /// How many times this note links here. One row is returned per linking
-    /// note, not per link, so this is what keeps the repeat count from being
-    /// thrown away along with the repeated rows.
+    /// 1-based line the mention sits on, or `None` when the source file could
+    /// not be read.
+    pub line: Option<i64>,
+    /// Mentions sharing this line. Two links on one line have one context
+    /// between them, so they are one entry rather than two identical ones.
     pub occurrences: i64,
 }
 
@@ -201,42 +204,125 @@ pub fn list_nodes(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> {
 
 /// Get backlinks for a node (other nodes that link TO this node).
 /// Includes context: the line from the source file containing the link.
-/// Notes that link here, one row per linking note.
+/// Notes that link here, one entry per mention with the line it sits on.
 ///
-/// `links` holds a row per link *occurrence*, so a note mentioning this one
-/// three times produced three rows — and since the context line is found by
-/// searching the file for the first match, all three came back identical and
-/// showed up in the panel as repeated entries. Grouping answers the question
-/// the panel actually asks, "which notes reference this one", and
-/// `occurrences` keeps the count that grouping would otherwise discard.
+/// `links` holds a row per occurrence and each carries the byte offset of the
+/// link, so a mention can be shown with the line it actually appears on rather
+/// than with the first match in the file — which is what made repeated mentions
+/// come back as identical, indistinguishable rows.
+///
+/// Mentions sharing a line collapse into one entry: they have one context
+/// between them, so listing them separately would repeat that line verbatim.
+///
+/// Reads through `std::fs`; see [`get_backlinks_with`] for a vault that is not
+/// a directory.
 pub fn get_backlinks(conn: &Connection, node_id: &str) -> rusqlite::Result<Vec<BacklinkRecord>> {
+    get_backlinks_with(conn, node_id, &crate::vaultfs::NativeFs)
+}
+
+/// As [`get_backlinks`], reading source files through `fs`.
+///
+/// Android reaches its vault over the Storage Access Framework, where the
+/// stored path is not something `std::fs` can open — without this the previews
+/// would silently come back empty there.
+pub fn get_backlinks_with(
+    conn: &Connection,
+    node_id: &str,
+    fs: &dyn crate::vaultfs::VaultFs,
+) -> rusqlite::Result<Vec<BacklinkRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT l.source, n.title, n.file, l.type, COUNT(*)
+        "SELECT l.source, n.title, n.file, l.type, l.pos
          FROM links l
          JOIN nodes n ON n.id = l.source
          WHERE l.dest = ?1
-         GROUP BY l.source, l.type
-         ORDER BY n.title",
+         ORDER BY n.title, l.pos",
     )?;
 
-    let rows = stmt.query_map([node_id], |row| {
-        let source_file: String = row.get(2)?;
-        // Try to extract context line from file
-        let context = extract_link_context(&source_file, node_id);
-        Ok(BacklinkRecord {
-            source_id: row.get(0)?,
-            source_title: row.get(1)?,
-            source_file,
-            link_type: row.get(3)?,
-            context,
-            occurrences: row.get(4)?,
-        })
-    })?;
+    struct Row {
+        source_id: String,
+        source_title: Option<String>,
+        source_file: String,
+        link_type: String,
+        pos: i64,
+    }
 
-    rows.collect()
+    let rows: Vec<Row> = stmt
+        .query_map([node_id], |row| {
+            Ok(Row {
+                source_id: row.get(0)?,
+                source_title: row.get(1)?,
+                source_file: row.get(2)?,
+                link_type: row.get(3)?,
+                pos: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    // One read per source file, not one per mention.
+    let mut contents: HashMap<String, Option<String>> = HashMap::new();
+    let mut out: Vec<BacklinkRecord> = Vec::new();
+    // Keyed by source and line so mentions sharing a line become one entry.
+    let mut seen: HashMap<(String, i64), usize> = HashMap::new();
+
+    for row in rows {
+        let content = contents
+            .entry(row.source_file.clone())
+            .or_insert_with(|| fs.read_to_string(&row.source_file).ok());
+
+        let located = content.as_deref().and_then(|c| line_at(c, row.pos as usize));
+        let key = (row.source_id.clone(), located.as_ref().map(|l| l.0).unwrap_or(-1));
+
+        if let Some(&index) = seen.get(&key) {
+            // Same line, already listed: count it rather than repeat it.
+            let existing: &mut BacklinkRecord = &mut out[index];
+            existing.occurrences += 1;
+            continue;
+        }
+        seen.insert(key, out.len());
+        out.push(BacklinkRecord {
+            source_id: row.source_id,
+            source_title: row.source_title,
+            source_file: row.source_file,
+            link_type: row.link_type,
+            context: located.as_ref().map(|l| l.1.clone()),
+            line: located.map(|l| l.0),
+            occurrences: 1,
+        });
+    }
+
+    Ok(out)
 }
 
-/// Get forward links from a node (nodes this node links TO)
+/// The 1-based line number and trimmed text of the line containing `offset`.
+///
+/// `offset` is a byte offset into the file, as recorded when the link was
+/// indexed. An offset past the end means the file changed since; the caller
+/// gets `None` rather than a line that is no longer the right one.
+fn line_at(content: &str, offset: usize) -> Option<(i64, String)> {
+    if offset > content.len() {
+        return None;
+    }
+    let start = content[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let end = content[offset..]
+        .find('\n')
+        .map(|i| offset + i)
+        .unwrap_or(content.len());
+    let number = content[..start].matches('\n').count() as i64 + 1;
+
+    let trimmed = content[start..end].trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Keep the preview to a line's worth; the panel clamps it further.
+    let capped = if trimmed.chars().count() > 160 {
+        let cut: String = trimmed.chars().take(160).collect();
+        format!("{cut}...")
+    } else {
+        trimmed.to_string()
+    };
+    Some((number, capped))
+}
+
 /// Notes this one links to, one row per destination.
 ///
 /// Grouped for the same reason as [`get_backlinks`]: listing the same target
@@ -262,23 +348,6 @@ pub fn get_forward_links(conn: &Connection, node_id: &str) -> rusqlite::Result<V
     })?;
 
     rows.collect()
-}
-
-/// Extract the line containing a link to the given node_id from a file
-fn extract_link_context(file_path: &str, target_id: &str) -> Option<String> {
-    let content = std::fs::read_to_string(file_path).ok()?;
-    let search = format!("[[id:{target_id}");
-    for line in content.lines() {
-        if line.contains(&search) {
-            // Clean up the line for display
-            let trimmed = line.trim();
-            if trimmed.len() > 120 {
-                return Some(format!("{}...", &trimmed[..120]));
-            }
-            return Some(trimmed.to_string());
-        }
-    }
-    None
 }
 
 /// Search nodes by title (FTS5) — returns NodeRecord for backward compat
@@ -873,6 +942,7 @@ impl<T> OptionalExt<T> for rusqlite::Result<T> {
 mod tests {
     use super::*;
     use crate::{index, schema};
+    use tempfile::TempDir;
 
     fn setup_test_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -1015,56 +1085,93 @@ Today's notes about [[id:alpha-id][Alpha]].
         assert_eq!(files.len(), 3);
     }
 
-    /// A note that mentions another several times is still one backlink.
+    /// Each mention gets the line it actually appears on.
     ///
-    /// `links` stores a row per occurrence, so this used to return one entry
-    /// per mention — and because the context line is the first match in the
-    /// file, every entry was identical. The panel showed the same note over
-    /// and over.
+    /// The previews used to be found by searching the file for the first line
+    /// containing the target id, so every mention from a note showed the same
+    /// text and the panel looked like it was repeating itself.
     #[test]
-    fn a_note_linking_many_times_is_one_backlink() {
+    fn each_mention_carries_its_own_context() {
+        let dir = TempDir::new().unwrap();
+        let source_path = dir.path().join("source.org");
+        let source = "\
+:PROPERTIES:\n:ID: source-id\n:END:\n#+TITLE: Source\n\n\
+Intro mentioning [[id:target-id][Target]].\n\n\
+Later on, [[id:target-id][Target]] again.\n\n\
+And a third [[id:target-id][Target]].\n";
+        std::fs::write(&source_path, source).unwrap();
+
         let conn = Connection::open_in_memory().unwrap();
         schema::init_schema(&conn).unwrap();
         schema::init_fts(&conn).unwrap();
-
         index::index_file(
             &conn,
             "target.org",
             ":PROPERTIES:\n:ID: target-id\n:END:\n#+TITLE: Target\n",
         )
         .unwrap();
-        index::index_file(
-            &conn,
-            "source.org",
-            ":PROPERTIES:\n:ID: source-id\n:END:\n#+TITLE: Source\n\n\
-             Intro mentioning [[id:target-id][Target]].\n\n\
-             Later on, [[id:target-id][Target]] again.\n\n\
-             And a third [[id:target-id][Target]].\n",
-        )
-        .unwrap();
+        index::index_file(&conn, source_path.to_str().unwrap(), source).unwrap();
 
         let backlinks = get_backlinks(&conn, "target-id").unwrap();
-        assert_eq!(backlinks.len(), 1, "one linking note, one entry");
-        assert_eq!(backlinks[0].source_id, "source-id");
-        assert_eq!(backlinks[0].occurrences, 3, "the repeat count is kept");
+        assert_eq!(backlinks.len(), 3, "one entry per mention");
 
-        let forward = get_forward_links(&conn, "source-id").unwrap();
-        assert_eq!(forward.len(), 1, "one destination, one entry");
-        assert_eq!(forward[0].occurrences, 3);
+        let contexts: Vec<&str> = backlinks
+            .iter()
+            .map(|b| b.context.as_deref().unwrap_or(""))
+            .collect();
+        assert!(contexts[0].starts_with("Intro mentioning"), "{contexts:?}");
+        assert!(contexts[1].starts_with("Later on,"), "{contexts:?}");
+        assert!(contexts[2].starts_with("And a third"), "{contexts:?}");
+
+        let lines: Vec<Option<i64>> = backlinks.iter().map(|b| b.line).collect();
+        assert_eq!(lines, vec![Some(6), Some(8), Some(10)], "ordered by position");
     }
 
-    /// Grouping must not merge different notes into one row.
+    /// Two mentions on one line share a preview, so they are one entry.
     #[test]
-    fn distinct_notes_stay_distinct_backlinks() {
+    fn mentions_sharing_a_line_are_one_entry() {
+        let dir = TempDir::new().unwrap();
+        let source_path = dir.path().join("source.org");
+        let source = ":PROPERTIES:\n:ID: source-id\n:END:\n#+TITLE: Source\n\n\
+Compare [[id:target-id][Target]] with [[id:target-id][Target]] again.\n";
+        std::fs::write(&source_path, source).unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        schema::init_schema(&conn).unwrap();
+        schema::init_fts(&conn).unwrap();
+        index::index_file(
+            &conn,
+            "target.org",
+            ":PROPERTIES:\n:ID: target-id\n:END:\n#+TITLE: Target\n",
+        )
+        .unwrap();
+        index::index_file(&conn, source_path.to_str().unwrap(), source).unwrap();
+
+        let backlinks = get_backlinks(&conn, "target-id").unwrap();
+        assert_eq!(backlinks.len(), 1, "one line, one entry");
+        assert_eq!(backlinks[0].occurrences, 2, "both mentions counted");
+    }
+
+    /// An unreadable source still produces an entry, just without a preview.
+    #[test]
+    fn a_missing_source_file_still_lists_its_backlink() {
         let conn = setup_test_db();
-        // alpha is linked from beta.org and from the daily note, once each.
+        // setup_test_db indexes content that was never written to disk.
         let backlinks = get_backlinks(&conn, "alpha-id").unwrap();
-        let sources: Vec<&str> = backlinks.iter().map(|b| b.source_id.as_str()).collect();
-        assert_eq!(backlinks.len(), 2, "got {sources:?}");
-        assert!(sources.contains(&"beta-id"));
-        assert!(sources.contains(&"daily-2024-01-15"));
+        assert_eq!(backlinks.len(), 2, "beta and the daily note still listed");
         for b in &backlinks {
-            assert_eq!(b.occurrences, 1);
+            assert!(b.context.is_none(), "no file to read a preview from");
+            assert!(b.line.is_none());
         }
+    }
+
+    /// Grouping forward links must not merge different destinations.
+    #[test]
+    fn distinct_destinations_stay_distinct() {
+        let conn = setup_test_db();
+        let forward = get_forward_links(&conn, "alpha-id").unwrap();
+        assert_eq!(forward.len(), 1);
+        assert_eq!(forward[0].dest_id, "beta-id");
+        assert_eq!(forward[0].occurrences, 1);
     }
 }
