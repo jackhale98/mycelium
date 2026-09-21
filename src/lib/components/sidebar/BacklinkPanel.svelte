@@ -65,6 +65,14 @@
 						>
 							<div class="flex items-center gap-2">
 								<span class="font-medium text-sm">{bl.source_title ?? bl.source_file.split('/').pop()}</span>
+								{#if bl.occurrences > 1}
+									<!-- The note is listed once; this is what it would have been
+									     repeated for. -->
+									<span
+										class="shrink-0 rounded-full bg-surface-100 px-1.5 py-0.5 text-[10px] font-medium text-surface-600 dark:bg-surface-800 dark:text-surface-400"
+										title="Links here {bl.occurrences} times"
+									>×{bl.occurrences}</span>
+								{/if}
 							</div>
 							{#if bl.context}
 								<p class="mt-1.5 text-xs leading-relaxed text-surface-700 dark:text-surface-300 line-clamp-2">
@@ -122,6 +130,12 @@
 								<path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-1.125a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.757 8.688" />
 							</svg>
 							<span class="truncate">{fl.dest_title ?? fl.dest_id}</span>
+							{#if fl.occurrences > 1}
+								<span
+									class="ml-auto shrink-0 rounded-full bg-surface-100 px-1.5 py-0.5 text-[10px] font-medium text-surface-600 dark:bg-surface-800 dark:text-surface-400"
+									title="Linked {fl.occurrences} times"
+								>×{fl.occurrences}</span>
+							{/if}
 						</button>
 					</li>
 				{/each}

@@ -61,6 +61,10 @@ pub struct BacklinkRecord {
     pub source_file: String,
     pub link_type: String,
     pub context: Option<String>,
+    /// How many times this note links here. One row is returned per linking
+    /// note, not per link, so this is what keeps the repeat count from being
+    /// thrown away along with the repeated rows.
+    pub occurrences: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +73,8 @@ pub struct ForwardLink {
     pub dest_title: Option<String>,
     pub dest_file: Option<String>,
     pub link_type: String,
+    /// How many times this note links to that one.
+    pub occurrences: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,12 +201,21 @@ pub fn list_nodes(conn: &Connection) -> rusqlite::Result<Vec<NodeRecord>> {
 
 /// Get backlinks for a node (other nodes that link TO this node).
 /// Includes context: the line from the source file containing the link.
+/// Notes that link here, one row per linking note.
+///
+/// `links` holds a row per link *occurrence*, so a note mentioning this one
+/// three times produced three rows — and since the context line is found by
+/// searching the file for the first match, all three came back identical and
+/// showed up in the panel as repeated entries. Grouping answers the question
+/// the panel actually asks, "which notes reference this one", and
+/// `occurrences` keeps the count that grouping would otherwise discard.
 pub fn get_backlinks(conn: &Connection, node_id: &str) -> rusqlite::Result<Vec<BacklinkRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT l.source, n.title, n.file, l.type
+        "SELECT l.source, n.title, n.file, l.type, COUNT(*)
          FROM links l
          JOIN nodes n ON n.id = l.source
          WHERE l.dest = ?1
+         GROUP BY l.source, l.type
          ORDER BY n.title",
     )?;
 
@@ -214,6 +229,7 @@ pub fn get_backlinks(conn: &Connection, node_id: &str) -> rusqlite::Result<Vec<B
             source_file,
             link_type: row.get(3)?,
             context,
+            occurrences: row.get(4)?,
         })
     })?;
 
@@ -221,12 +237,17 @@ pub fn get_backlinks(conn: &Connection, node_id: &str) -> rusqlite::Result<Vec<B
 }
 
 /// Get forward links from a node (nodes this node links TO)
+/// Notes this one links to, one row per destination.
+///
+/// Grouped for the same reason as [`get_backlinks`]: listing the same target
+/// once per mention told the reader nothing they could act on.
 pub fn get_forward_links(conn: &Connection, node_id: &str) -> rusqlite::Result<Vec<ForwardLink>> {
     let mut stmt = conn.prepare(
-        "SELECT l.dest, n.title, n.file, l.type
+        "SELECT l.dest, n.title, n.file, l.type, COUNT(*)
          FROM links l
          LEFT JOIN nodes n ON n.id = l.dest
          WHERE l.source = ?1
+         GROUP BY l.dest, l.type
          ORDER BY n.title",
     )?;
 
@@ -236,6 +257,7 @@ pub fn get_forward_links(conn: &Connection, node_id: &str) -> rusqlite::Result<V
             dest_title: row.get(1)?,
             dest_file: row.get(2)?,
             link_type: row.get(3)?,
+            occurrences: row.get(4)?,
         })
     })?;
 
@@ -991,5 +1013,58 @@ Today's notes about [[id:alpha-id][Alpha]].
         let conn = setup_test_db();
         let files = list_files(&conn).unwrap();
         assert_eq!(files.len(), 3);
+    }
+
+    /// A note that mentions another several times is still one backlink.
+    ///
+    /// `links` stores a row per occurrence, so this used to return one entry
+    /// per mention — and because the context line is the first match in the
+    /// file, every entry was identical. The panel showed the same note over
+    /// and over.
+    #[test]
+    fn a_note_linking_many_times_is_one_backlink() {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::init_schema(&conn).unwrap();
+        schema::init_fts(&conn).unwrap();
+
+        index::index_file(
+            &conn,
+            "target.org",
+            ":PROPERTIES:\n:ID: target-id\n:END:\n#+TITLE: Target\n",
+        )
+        .unwrap();
+        index::index_file(
+            &conn,
+            "source.org",
+            ":PROPERTIES:\n:ID: source-id\n:END:\n#+TITLE: Source\n\n\
+             Intro mentioning [[id:target-id][Target]].\n\n\
+             Later on, [[id:target-id][Target]] again.\n\n\
+             And a third [[id:target-id][Target]].\n",
+        )
+        .unwrap();
+
+        let backlinks = get_backlinks(&conn, "target-id").unwrap();
+        assert_eq!(backlinks.len(), 1, "one linking note, one entry");
+        assert_eq!(backlinks[0].source_id, "source-id");
+        assert_eq!(backlinks[0].occurrences, 3, "the repeat count is kept");
+
+        let forward = get_forward_links(&conn, "source-id").unwrap();
+        assert_eq!(forward.len(), 1, "one destination, one entry");
+        assert_eq!(forward[0].occurrences, 3);
+    }
+
+    /// Grouping must not merge different notes into one row.
+    #[test]
+    fn distinct_notes_stay_distinct_backlinks() {
+        let conn = setup_test_db();
+        // alpha is linked from beta.org and from the daily note, once each.
+        let backlinks = get_backlinks(&conn, "alpha-id").unwrap();
+        let sources: Vec<&str> = backlinks.iter().map(|b| b.source_id.as_str()).collect();
+        assert_eq!(backlinks.len(), 2, "got {sources:?}");
+        assert!(sources.contains(&"beta-id"));
+        assert!(sources.contains(&"daily-2024-01-15"));
+        for b in &backlinks {
+            assert_eq!(b.occurrences, 1);
+        }
     }
 }

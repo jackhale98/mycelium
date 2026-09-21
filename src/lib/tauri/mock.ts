@@ -441,41 +441,58 @@ export const mockHandlers: Record<string, (args: Record<string, unknown>) => unk
 
 	get_node: (args) => MOCK_NODES.find(n => n.id === args.id) ?? null,
 
-	// Backlinks: find all files that contain a link TO this node
+	// Backlinks: which notes link TO this one. Grouped per note, like the real
+	// query — one row per link occurrence would repeat the same note.
 	get_backlinks: (args) => {
 		const targetId = args.nodeId as string;
 		const inbound = ALL_LINKS.filter(l => l.targetNodeId === targetId);
 
-		return inbound.map(l => {
+		const bySource = new Map<string, BacklinkRecord>();
+		for (const l of inbound) {
+			const existing = bySource.get(l.sourceNodeId);
+			if (existing) {
+				existing.occurrences += 1;
+				continue;
+			}
 			const sourceNode = MOCK_NODES.find(n => n.id === l.sourceNodeId);
 			// Extract the actual line containing the link for context
 			const fileContent = FILES[l.sourceFile] ?? '';
 			const contextLine = fileContent.split('\n').find(line => line.includes(`[[id:${targetId}`));
 
-			return {
+			bySource.set(l.sourceNodeId, {
 				source_id: l.sourceNodeId,
 				source_title: sourceNode?.title ?? null,
 				source_file: l.sourceFile,
 				link_type: 'id',
 				context: contextLine?.trim() ?? null,
-			} as BacklinkRecord;
-		});
+				occurrences: 1,
+			});
+		}
+		return [...bySource.values()];
 	},
 
-	// Forward links: find all [[id:...]] links inside this node's file
+	// Forward links: which notes this one links to, grouped per destination.
 	get_forward_links: (args) => {
 		const sourceId = args.nodeId as string;
 		const outbound = ALL_LINKS.filter(l => l.sourceNodeId === sourceId);
 
-		return outbound.map(l => {
+		const byDest = new Map<string, ForwardLink>();
+		for (const l of outbound) {
+			const existing = byDest.get(l.targetNodeId);
+			if (existing) {
+				existing.occurrences += 1;
+				continue;
+			}
 			const targetNode = MOCK_NODES.find(n => n.id === l.targetNodeId);
-			return {
+			byDest.set(l.targetNodeId, {
 				dest_id: l.targetNodeId,
 				dest_title: targetNode?.title ?? l.targetNodeId,
 				dest_file: targetNode?.file ?? null,
 				link_type: 'id',
-			} as ForwardLink;
-		});
+				occurrences: 1,
+			});
+		}
+		return [...byDest.values()];
 	},
 
 	search_nodes: (args) => {

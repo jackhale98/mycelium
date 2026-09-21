@@ -18,6 +18,8 @@ export interface BacklinkRecord {
 	source_file: string;
 	link_type: string;
 	context: string | null;
+	/** How many times that note links here. One entry is returned per note. */
+	occurrences: number;
 }
 
 export interface ForwardLink {
@@ -25,6 +27,8 @@ export interface ForwardLink {
 	dest_title: string | null;
 	dest_file: string | null;
 	link_type: string;
+	/** How many times this note links to that one. */
+	occurrences: number;
 }
 
 export interface GraphNode {
