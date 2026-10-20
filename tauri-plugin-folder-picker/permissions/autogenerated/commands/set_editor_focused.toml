@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-set-editor-focused"
+description = "Enables the set_editor_focused command without any pre-configured scope."
+commands.allow = ["set_editor_focused"]
+
+[[permission]]
+identifier = "deny-set-editor-focused"
+description = "Denies the set_editor_focused command without any pre-configured scope."
+commands.deny = ["set_editor_focused"]

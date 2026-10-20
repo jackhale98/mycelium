@@ -18,12 +18,16 @@ pub async fn get_or_create_daily(
     timestamp: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<query::NodeRecord, String> {
+    // Looking for today's note and creating it is one step, or two callers can
+    // each find none and create one apiece.
+    let _writes = state.lock_writes();
     ensure_daily(&app, &state, &date, timestamp.as_deref())
 }
 
 /// Resolve the daily note for `date`, creating it if it does not exist yet.
 /// Shared by `get_or_create_daily` and quick capture so both always agree on
-/// which file a given day's note is.
+/// which file a given day's note is. The caller holds
+/// [`AppState::lock_writes`].
 pub fn ensure_daily(
     app: &AppHandle,
     state: &AppState,

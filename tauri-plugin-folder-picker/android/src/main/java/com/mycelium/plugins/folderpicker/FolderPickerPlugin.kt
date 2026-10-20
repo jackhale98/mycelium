@@ -32,6 +32,11 @@ class WriteArgs {
     lateinit var id: String
 }
 
+@InvokeArg
+class EditorFocusArgs {
+    var focused: Boolean = false
+}
+
 /**
  * Vault access and the editing toolbar, exposed to the Rust side.
  *
@@ -102,15 +107,21 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun listOrgFiles(invoke: Invoke) {
         io(invoke) {
+            val listing = storage.listOrgFiles()
             val files = JSArray()
-            for (file in storage.listOrgFiles()) {
+            for (file in listing.files) {
                 files.put(JSObject().apply {
                     put("path", file.path)
                     // Compared for equality only, never parsed.
                     put("mtime", file.lastModified.toString())
                 })
             }
-            JSObject().apply { put("files", files) }
+            val unreadable = JSArray()
+            for (dir in listing.unreadable) unreadable.put(dir)
+            JSObject().apply {
+                put("files", files)
+                put("unreadable", unreadable)
+            }
         }
     }
 
@@ -177,6 +188,16 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
             backHandler.install(wv)
             systemInsets.install(wv)
             invoke.resolve(JSObject().apply { put("installed", true) })
+        }
+    }
+
+    /** Show the toolbar only while the note editor has focus. */
+    @Command
+    fun setEditorFocused(invoke: Invoke) {
+        val args = invoke.parseArgs(EditorFocusArgs::class.java)
+        activity.runOnUiThread {
+            toolbar.setEditorFocused(args.focused)
+            invoke.resolve(JSObject().apply { put("focused", args.focused) })
         }
     }
 

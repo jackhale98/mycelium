@@ -21,9 +21,18 @@ class NavigationStore {
 		}
 	}
 
+	/**
+	 * Save pending edits before leaving the page. `false` means they did not
+	 * land (a conflict, a failed write) and the caller must stay: every way out
+	 * of a note throws its buffer away, and the editor is showing why.
+	 */
+	private async leave(): Promise<boolean> {
+		return editor.flush();
+	}
+
 	/** Go back to the previous page in our history stack */
 	async goBack() {
-		await editor.flush();
+		if (!(await this.leave())) return;
 		try {
 			const history = JSON.parse(sessionStorage.getItem('mycelium-nav-history') ?? '[]') as string[];
 			const prev = history.pop();
@@ -44,7 +53,7 @@ class NavigationStore {
 	/** Navigate to a node — uses full reload since node page reads ID on mount */
 	async navigateToNode(id: string) {
 		// A reload discards the JS heap, so pending edits must reach disk first.
-		await editor.flush();
+		if (!(await this.leave())) return;
 		this.pushHistory();
 		this.activeTab = 'files';
 		window.location.href = `/vault/node/${id}`;
@@ -52,42 +61,49 @@ class NavigationStore {
 
 	// Tab navigations use goto() for instant client-side transitions (no flash)
 	async navigateToGraph() {
-		await editor.flush();
+		if (!(await this.leave())) return;
 		this.pushHistory();
 		this.activeTab = 'graph';
 		goto('/vault/graph');
 	}
 
 	async navigateToSearch() {
-		await editor.flush();
+		if (!(await this.leave())) return;
 		this.pushHistory();
 		this.activeTab = 'search';
 		goto('/vault/search');
 	}
 
 	async navigateToDaily() {
-		await editor.flush();
+		if (!(await this.leave())) return;
 		this.pushHistory();
 		this.activeTab = 'daily';
 		goto('/vault/daily');
 	}
 
 	async navigateToTags() {
-		await editor.flush();
+		if (!(await this.leave())) return;
 		this.pushHistory();
 		goto('/vault/tags');
 	}
 
 	async navigateToVault() {
-		await editor.flush();
+		if (!(await this.leave())) return;
 		this.pushHistory();
 		this.activeTab = 'files';
 		goto('/vault');
 	}
 
 	async navigateHome() {
-		await editor.flush();
+		if (!(await this.leave())) return;
 		window.location.href = '/';
+	}
+
+	/** Switch to a bottom-bar tab, saving the open note first. */
+	async navigateToTab(tab: Tab, href: string) {
+		if (!(await this.leave())) return;
+		this.activeTab = tab;
+		goto(href);
 	}
 
 	toggleSidebar() {

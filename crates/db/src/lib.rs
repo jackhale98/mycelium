@@ -14,7 +14,7 @@ pub use query::{
 pub use schema::{check_fts_integrity, rebuild_fts, repair_fts, reset_database};
 pub use sync::{is_ignored_dir, IGNORED_DIRS};
 pub use sweep::{sweep, SweepReport};
-pub use vaultfs::{NativeFs, VaultDirEntry, VaultEntry, VaultFs, VaultFsError};
+pub use vaultfs::{NativeFs, ScanError, VaultDirEntry, VaultEntry, VaultFs, VaultFsError, VaultScan};
 pub use sync::{SyncError, SyncResult};
 
 use rusqlite::Connection;

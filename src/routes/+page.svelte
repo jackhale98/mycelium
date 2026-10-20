@@ -179,6 +179,9 @@
 						type="text"
 						bind:value={vaultPath}
 						placeholder="Path to your org-roam vault..."
+						autocorrect="off"
+						autocapitalize="off"
+						spellcheck="false"
 						class="flex-1 rounded-lg border border-surface-200 bg-surface-50 px-4 py-3 text-sm focus:border-mycelium-500 focus:outline-none focus:ring-2 focus:ring-mycelium-500/20 dark:border-surface-700 dark:bg-surface-900"
 						onkeydown={(e) => e.key === 'Enter' && handleOpenVault()}
 					/>

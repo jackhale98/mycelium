@@ -10,6 +10,12 @@ pub struct PickFolderResponse {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorFocusRequest {
+    pub focused: bool,
+}
+
 // ── Vault file access (Android) ───────────────────────────────────────────
 //
 // Paths in these payloads are vault-relative, using `/` separators. The Kotlin
@@ -43,6 +49,10 @@ pub struct VaultFileEntry {
 #[serde(rename_all = "camelCase")]
 pub struct ListFilesResponse {
     pub files: Vec<VaultFileEntry>,
+    /// Vault-relative directories the walk could not read. Files under them
+    /// are unaccounted for, not deleted.
+    #[serde(default)]
+    pub unreadable: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

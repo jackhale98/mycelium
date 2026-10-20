@@ -14,7 +14,7 @@
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use db::{VaultDirEntry, VaultEntry, VaultFs, VaultFsError};
+use db::{ScanError, VaultDirEntry, VaultEntry, VaultFs, VaultFsError, VaultScan};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_folder_picker::FolderPickerExt;
 
@@ -35,20 +35,30 @@ fn failed(path: &str, error: impl std::fmt::Display) -> VaultFsError {
 impl<R: Runtime> VaultFs for AndroidFs<R> {
     /// `root` is ignored: the plugin already holds the tree the user granted,
     /// and there is no second vault it could be asked about.
-    fn list_org_files(&self, _root: &str) -> Result<Vec<VaultEntry>, VaultFsError> {
+    fn list_org_files(&self, _root: &str) -> Result<VaultScan, VaultFsError> {
         let response = self
             .app
             .folder_picker()
             .list_org_files()
             .map_err(|e| VaultFsError::Io(e.to_string()))?;
-        Ok(response
-            .files
-            .into_iter()
-            .map(|f| VaultEntry {
-                path: f.path,
-                mtime: f.mtime,
-            })
-            .collect())
+        Ok(VaultScan {
+            entries: response
+                .files
+                .into_iter()
+                .map(|f| VaultEntry {
+                    path: f.path,
+                    mtime: f.mtime,
+                })
+                .collect(),
+            errors: response
+                .unreadable
+                .into_iter()
+                .map(|dir| ScanError {
+                    message: format!("Could not read a folder in the vault: {dir}"),
+                    path: Some(dir),
+                })
+                .collect(),
+        })
     }
 
     fn read_to_string(&self, path: &str) -> Result<String, VaultFsError> {

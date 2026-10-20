@@ -68,6 +68,10 @@
 			oninput={handleInput}
 			onkeydown={handleKeydown}
 			placeholder="Search nodes..."
+			enterkeyhint="search"
+			autocorrect="off"
+			autocapitalize="off"
+			spellcheck="false"
 			class="w-full rounded-t-xl border-b border-surface-200 bg-transparent px-4 py-3 text-sm focus:outline-none dark:border-surface-700"
 			autofocus
 		/>

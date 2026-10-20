@@ -35,7 +35,17 @@
 	let showMenu = $state(false);
 	let editorComponent: OrgEditor;
 	let nodeId = $state<string | null>(null);
-	let showSource = $state(false);
+	// Whether the note opens in the editor. Remembered, so someone writing moves
+	// between notes without tapping into edit mode on every one.
+	const EDITING_KEY = 'mycelium-editing';
+	let showSource = $state(readEditingPref());
+	function readEditingPref(): boolean {
+		try { return localStorage.getItem(EDITING_KEY) === '1'; } catch { return false; }
+	}
+	$effect(() => {
+		const editing = showSource;
+		try { localStorage.setItem(EDITING_KEY, editing ? '1' : '0'); } catch { /* not worth failing over */ }
+	});
 	let showRename = $state(false);
 	let renameTitle = $state('');
 	let showLinks = $state(false);
@@ -124,6 +134,9 @@
 		};
 
 		return () => {
+			// Last chance for edits typed since the autosave was scheduled; the
+			// navigation paths flush first, this covers any that do not.
+			if (editor.isDirty) { clearTimeout(autoSaveTimer); void handleSave(); }
 			document.removeEventListener('org-editor-save', onSave);
 			document.removeEventListener('keydown', onKey);
 			window.removeEventListener('pagehide', onHide);
@@ -147,7 +160,22 @@
 		} catch (e) { error = String(e); }
 	}
 
-	async function handleSave() {
+	// Saves run one at a time. Each sends the hash the one before it returned;
+	// two in flight together — an autosave and a flush on the way out, say — sent
+	// the same stale hash, and the second raised a conflict against the app's
+	// own write.
+	let saveQueue: Promise<void> = Promise.resolve();
+	function queueSave(task: () => Promise<void>): Promise<void> {
+		const run = saveQueue.then(task);
+		saveQueue = run.catch(() => {});
+		return run;
+	}
+
+	function handleSave(): Promise<void> {
+		return queueSave(saveNow);
+	}
+
+	async function saveNow() {
 		if (!editor.filePath || !editor.isDirty || conflict) return;
 		// Snapshot what we send: anything typed while the write is in flight must
 		// stay dirty rather than being marked saved.
@@ -156,6 +184,7 @@
 		try {
 			const hash = await saveFile(editor.filePath, snapshot, editor.savedHash ?? undefined);
 			editor.markSaved(snapshot, hash);
+			error = null;
 			if (nodeId) {
 				const [bl, fl] = await Promise.all([getBacklinks(nodeId), getForwardLinks(nodeId)]);
 				backlinks = bl; forwardLinks = fl;
@@ -181,7 +210,11 @@
 	}
 
 	/** Keep our buffer and overwrite whatever landed on disk. */
-	async function overwriteOnDisk() {
+	function overwriteOnDisk(): Promise<void> {
+		return queueSave(overwriteNow);
+	}
+
+	async function overwriteNow() {
 		if (!editor.filePath) return;
 		const snapshot = editor.content;
 		conflict = null;
@@ -597,11 +630,15 @@
 			</button>
 		{/if}
 
-		<!-- Save indicator -->
-		{#if editor.isSaving}
-			<span class="text-xs text-surface-700 dark:text-surface-300">Saving...</span>
-		{:else if editor.isDirty}
+		<!-- Save indicator. With autosave it is a quiet status in a fixed width, so
+		     the header does not reflow under the title on every keystroke; the
+		     button is for manual saving only. -->
+		{#if !prefs.autoSaves && editor.isDirty && !editor.isSaving}
 			<button onclick={handleSave} class="rounded-lg bg-mycelium-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-mycelium-700">Save</button>
+		{:else if showSource || editor.isSaving || editor.isDirty}
+			<span class="w-12 shrink-0 text-right text-[11px] text-surface-700 dark:text-surface-300" aria-live="polite">
+				{editor.isSaving ? 'Saving…' : editor.isDirty ? 'Edited' : 'Saved'}
+			</span>
 		{/if}
 
 		<!-- Export menu -->
@@ -643,6 +680,10 @@
 				oninput={() => doFind()}
 				onkeydown={(e) => { if (e.key === 'Enter') { e.shiftKey ? findPrev() : findNext(); } if (e.key === 'Escape') closeFind(); }}
 				placeholder="Find in page..."
+				enterkeyhint="search"
+				autocorrect="off"
+				autocapitalize="off"
+				spellcheck="false"
 				class="flex-1 rounded-md border border-surface-200 bg-surface-0 px-3 py-1.5 text-sm focus:border-mycelium-500 focus:outline-none dark:border-surface-700 dark:bg-surface-950"
 				autofocus
 			/>
@@ -723,7 +764,9 @@
 		<input
 			type="text"
 			bind:value={renameTitle}
-			onkeydown={(e) => e.key === 'Enter' && handleRename()}
+			onkeydown={(e) => e.key === 'Enter' && !e.isComposing && handleRename()}
+			enterkeyhint="done"
+			autocapitalize="sentences"
 			class="w-full rounded-lg border border-surface-200 bg-surface-50 px-4 py-2.5 text-sm focus:border-mycelium-500 focus:outline-none focus:ring-2 focus:ring-mycelium-500/20 dark:border-surface-700 dark:bg-surface-950"
 			autofocus
 		/>

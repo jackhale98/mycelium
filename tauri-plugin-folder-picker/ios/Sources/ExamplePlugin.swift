@@ -4,6 +4,10 @@ import UIKit
 import WebKit
 import UniformTypeIdentifiers
 
+class EditorFocusArgs: Decodable {
+    let focused: Bool
+}
+
 class FolderPickerPlugin: Plugin {
     private var pendingInvoke: Invoke?
     /// Track the actively accessed security-scoped URL so we can stop/restart
@@ -84,6 +88,24 @@ class FolderPickerPlugin: Plugin {
         }
     }
 
+    /// Show or hide the keyboard toolbar as focus enters or leaves the editor.
+    ///
+    /// The page normally reports focus through a script message, which reaches
+    /// the toolbar ahead of the keyboard; this command is the fallback for the
+    /// moment before that handler is registered.
+    @objc public func setEditorFocused(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(EditorFocusArgs.self)
+        DispatchQueue.main.async {
+            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = scene.windows.first,
+               let webView = Self.findWKWebView(in: window),
+               let toolbar = KeyboardToolbar.installed(on: webView) {
+                toolbar.setEditorFocused(args.focused)
+            }
+            invoke.resolve(["focused": args.focused])
+        }
+    }
+
     /// Walk view hierarchy to find the WKWebView.
     private static func findWKWebView(in view: UIView) -> WKWebView? {
         if let wk = view as? WKWebView {
@@ -126,7 +148,8 @@ class FolderPickerPlugin: Plugin {
 
             // Activate security-scoped access for the entire directory (includes subdirectories)
             let accessing = beginSecurityScopedAccess(to: url)
-            NSLog("[Mycelium] Restored bookmark access for: %@ (accessing=%d, stale=%d)", url.path, accessing ? 1 : 0, isStale ? 1 : 0)
+            // Paths stay out of the system log: they name the user's folders.
+            NSLog("[Mycelium] Restored vault access (accessing=%d, stale=%d)", accessing ? 1 : 0, isStale ? 1 : 0)
 
             if isStale {
                 // Re-save the bookmark if stale
@@ -161,18 +184,9 @@ extension FolderPickerPlugin: UIDocumentPickerDelegate {
 
         // Releases any previously held URL before starting the new one
         let accessing = beginSecurityScopedAccess(to: url)
-        NSLog("[Mycelium] Picked folder: %@ (accessing=%d)", url.path, accessing ? 1 : 0)
-
-        // Enumerate subdirectories to verify access
-        if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-            var dirCount = 0
-            var fileCount = 0
-            while let item = enumerator.nextObject() as? URL {
-                let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                if isDir { dirCount += 1 } else { fileCount += 1 }
-            }
-            NSLog("[Mycelium] Vault contents: %d dirs, %d files", dirCount, fileCount)
-        }
+        // The vault is not walked here: this runs on the main thread, and the
+        // index scan that follows reports anything it cannot read.
+        NSLog("[Mycelium] Picked vault folder (accessing=%d)", accessing ? 1 : 0)
 
         do {
             let bookmarkData = try url.bookmarkData(
@@ -182,7 +196,7 @@ extension FolderPickerPlugin: UIDocumentPickerDelegate {
             )
             UserDefaults.standard.set(bookmarkData, forKey: "mycelium_vault_bookmark")
             UserDefaults.standard.set(url.path, forKey: "mycelium_vault_path")
-            NSLog("[Mycelium] Saved bookmark for: %@", url.path)
+            NSLog("[Mycelium] Saved vault bookmark")
         } catch {
             NSLog("[Mycelium] Bookmark save failed: %@", error.localizedDescription)
         }

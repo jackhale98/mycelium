@@ -35,7 +35,7 @@ impl<R: Runtime, T: Manager<R>> crate::FolderPickerExt<R> for T {
 /// Initializes the plugin.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
   Builder::new("folder-picker")
-    .invoke_handler(tauri::generate_handler![commands::pick_folder, commands::restore_access, commands::setup_toolbar])
+    .invoke_handler(tauri::generate_handler![commands::pick_folder, commands::restore_access, commands::setup_toolbar, commands::set_editor_focused])
     .setup(|app, api| {
       #[cfg(mobile)]
       let folder_picker = mobile::init(app, api)?;

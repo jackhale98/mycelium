@@ -21,6 +21,13 @@
 	let query = $state('');
 	let selectedIndex = $state(0);
 
+	// A new query means a new list; a highlight left at row 9 of the old one
+	// would make Enter pick something the user never looked at, or nothing.
+	$effect(() => {
+		const _ = query;
+		selectedIndex = 0;
+	});
+
 	const filtered = $derived(() => {
 		if (!query.trim()) return vault.nodes.slice(0, 15);
 		const q = query.toLowerCase();
@@ -42,7 +49,7 @@
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			selectedIndex = Math.max(selectedIndex - 1, 0);
-		} else if (e.key === 'Enter') {
+		} else if (e.key === 'Enter' && !e.isComposing) {
 			e.preventDefault();
 			const item = items[selectedIndex];
 			if (item) selectNode(item);
@@ -127,6 +134,10 @@
 				bind:value={query}
 				onkeydown={handleKeydown}
 				placeholder={mode === 'insert-link' ? 'Search nodes to link...' : 'Jump to node...'}
+				enterkeyhint="go"
+				autocorrect="off"
+				autocapitalize="off"
+				spellcheck="false"
 				class="w-full bg-transparent py-3.5 text-sm focus:outline-none"
 				autofocus
 			/>

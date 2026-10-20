@@ -60,6 +60,8 @@ pub async fn save_file(
     let vault_path = state.vault_path()?;
     let key = fsutil::vault_key(&vault_path, &file_path)?;
 
+    // The check and the write must not have another in-app write between them.
+    let _writes = state.lock_writes();
     if let Some(expected) = &expected_hash {
         check_no_conflict(&state, &key, expected)?;
     }
@@ -98,20 +100,55 @@ fn check_no_conflict(state: &AppState, key: &str, expected: &str) -> Result<(), 
 
 /// Write a vault file atomically and re-index it, suppressing the watcher echo.
 /// Returns the content hash of what was written.
+///
+/// Once the write lands it is reported as a success even if indexing then
+/// fails: the note on disk is what matters, the next sync indexes it, and
+/// reporting a failure would leave the caller holding the old hash — so its
+/// next save would raise a conflict against its own write.
 pub fn write_and_index(state: &AppState, key: &str, content: &str) -> Result<String, String> {
-    state
-        .vault_fs()
-        .write(key, content)
+    let fs = state.vault_fs();
+    fs.write(key, content)
         .map_err(|e| format!("Failed to write file: {e}"))?;
 
     let hash = fsutil::content_hash(content);
     state.note_own_write(key, &hash);
 
-    state.with_db(|conn| {
-        index::index_file(conn, key, content).map_err(|e| format!("Failed to index file: {e}"))
-    })?;
+    let indexed = state.with_db(|conn| {
+        index::index_file(conn, key, content).map_err(|e| e.to_string())?;
+        // Record the stamp the next scan will compare against. The indexer
+        // stats the file itself, which an Android vault key cannot be.
+        if let Ok(mtime) = fs.modified(key) {
+            let _ = conn.execute(
+                "UPDATE files SET mtime = ?1 WHERE file = ?2",
+                rusqlite::params![mtime, key],
+            );
+        }
+        Ok(())
+    });
+    if let Err(e) = indexed {
+        eprintln!("Saved a note but could not index it; the next sync will: {e}");
+    }
 
     Ok(hash)
+}
+
+/// A title as it can be written into `#+TITLE:` or a headline: one line, with
+/// no control characters.
+///
+/// A newline would end the line the title is written on and land the rest of
+/// it in the file as content of its own — another `#+` directive, a headline,
+/// a property drawer. Line breaks and other control characters become spaces.
+pub fn sanitize_title(title: &str) -> Result<String, String> {
+    let one_line: String = title
+        .replace("\r\n", " ")
+        .chars()
+        .map(|c| if c.is_control() || c == '\u{2028}' || c == '\u{2029}' { ' ' } else { c })
+        .collect();
+    let trimmed = one_line.trim();
+    if trimmed.is_empty() {
+        return Err("A title cannot be empty.".to_string());
+    }
+    Ok(trimmed.to_string())
 }
 
 /// Quick capture: append a text snippet to today's daily note.
@@ -135,6 +172,11 @@ pub async fn quick_capture(
         local_time.replace(':', "")
     );
 
+    // Finding (or creating) the note, reading it and writing it back are one
+    // step: two captures in quick succession must not both append to the same
+    // read and leave only the second.
+    let _writes = state.lock_writes();
+
     let node = daily::ensure_daily(&app, &state, &local_date, Some(&timestamp))?;
 
     let vault_path = state.vault_path()?;
@@ -143,15 +185,37 @@ pub async fn quick_capture(
     let mut content =
         state.vault_fs().read_to_string(&key).map_err(|e| format!("Failed to read daily note: {e}"))?;
 
-    if !content.is_empty() && !content.ends_with('\n') {
-        content.push('\n');
-    }
-    content.push_str(&format!("- [{local_time}] {text}\n"));
+    content = append_capture(&content, &local_time, &text);
 
     write_and_index(&state, &key, &content)?;
 
     let _ = app.emit("db-updated", ());
     Ok(key)
+}
+
+/// `content` with a capture appended as a timestamped list item.
+///
+/// A multi-line capture stays inside its item: continuation lines are
+/// indented under it, so a line that happens to start with `*` or `#+` is not
+/// read as a new headline or directive. The note's own line endings are used.
+pub fn append_capture(content: &str, local_time: &str, text: &str) -> String {
+    let eol = if content.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut out = content.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push_str(eol);
+    }
+    let mut lines = text.trim_end().lines();
+    out.push_str(&format!("- [{local_time}] {}", lines.next().unwrap_or("").trim_end_matches('\r')));
+    for line in lines {
+        out.push_str(eol);
+        let line = line.trim_end_matches('\r');
+        if !line.trim().is_empty() {
+            out.push_str("  ");
+            out.push_str(line);
+        }
+    }
+    out.push_str(eol);
+    out
 }
 
 /// Create a new org file with a UUID node (file-level property drawer).
@@ -165,9 +229,12 @@ pub async fn create_file(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     validate_timestamp(&timestamp)?;
+    let title = sanitize_title(&title)?;
 
     let vault_path = state.vault_path()?;
     let id = uuid::Uuid::new_v4().to_string();
+    // Choosing a free name and writing it is one step.
+    let _writes = state.lock_writes();
 
     let slug = slugify(&title);
     let key = unique_org_key(&state, &vault_path, "", &timestamp, &slug)?;
@@ -404,6 +471,61 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn titles_are_kept_to_one_line() {
+        // A newline would let a title write a directive or headline of its own.
+        assert_eq!(sanitize_title("Plan\n#+FILETAGS: :pwned:").unwrap(), "Plan #+FILETAGS: :pwned:");
+        assert_eq!(sanitize_title("a\r\nb").unwrap(), "a b");
+        assert_eq!(sanitize_title("a\rb\u{2028}c\td\u{0}e").unwrap(), "a b c d e");
+        assert_eq!(sanitize_title("  Café 🎉  ").unwrap(), "Café 🎉");
+        assert!(sanitize_title(" \n\t ").is_err());
+    }
+
+    #[test]
+    fn captures_append_as_one_list_item() {
+        assert_eq!(append_capture("#+TITLE: d\n", "09:30", "idea"), "#+TITLE: d\n- [09:30] idea\n");
+        assert_eq!(append_capture("#+TITLE: d", "09:30", "idea"), "#+TITLE: d\n- [09:30] idea\n");
+        // A continuation line starting with `*` must not become a headline.
+        assert_eq!(
+            append_capture("", "09:30", "first\n* not a heading\n\nlast\n"),
+            "- [09:30] first\n  * not a heading\n\n  last\n"
+        );
+        assert_eq!(append_capture("x\r\n", "09:30", "a\r\nb"), "x\r\n- [09:30] a\r\n  b\r\n");
+    }
+
+    #[test]
+    fn concurrent_captures_are_all_kept() {
+        // Two captures racing on one note: with the write lock held across the
+        // read and the write, neither can overwrite the other.
+        let state = std::sync::Arc::new(AppState::new());
+        let dir = tmp_dir("captures");
+        let key = dir.join("daily.org").to_string_lossy().to_string();
+        std::fs::write(&key, "#+TITLE: today\n").unwrap();
+
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                let state = std::sync::Arc::clone(&state);
+                let key = key.clone();
+                std::thread::spawn(move || {
+                    let _writes = state.lock_writes();
+                    let content = state.vault_fs().read_to_string(&key).unwrap();
+                    std::thread::yield_now();
+                    let next = append_capture(&content, "10:00", &format!("capture {n}"));
+                    state.vault_fs().write(&key, &next).unwrap();
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        let content = std::fs::read_to_string(&key).unwrap();
+        for n in 0..8 {
+            assert!(content.contains(&format!("capture {n}")), "capture {n} lost:\n{content}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -299,7 +299,9 @@ pub fn get_backlinks_with(
 /// indexed. An offset past the end means the file changed since; the caller
 /// gets `None` rather than a line that is no longer the right one.
 fn line_at(content: &str, offset: usize) -> Option<(i64, String)> {
-    if offset > content.len() {
+    // Past the end, or — after an edit shifted the text — inside a multi-byte
+    // character, where slicing would panic.
+    if offset > content.len() || !content.is_char_boundary(offset) {
         return None;
     }
     let start = content[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -701,10 +703,16 @@ pub fn get_graph_data_limited(conn: &Connection, limit: usize) -> rusqlite::Resu
 pub fn find_daily_note(conn: &Connection, date: &str) -> rusqlite::Result<Option<NodeRecord>> {
     // First try: node whose title matches the date. Prefer an exact title, then a
     // node living under daily/, then the shortest title — never an arbitrary row.
+    //
+    // Quick capture appends to whatever this returns, so a note that merely
+    // mentions the date ("Retro 2026-10-20") must never qualify: a title that
+    // is not exactly the date counts only for a note kept with the dailies.
     let node = conn.query_row(
         "SELECT id, file, level, pos, todo, priority, scheduled, deadline, title, properties, olp
          FROM nodes
-         WHERE title = ?1 OR title LIKE ?2
+         WHERE (title = ?1 AND level = 0)
+            OR (title LIKE ?2 AND (file LIKE '%/daily/%' OR file LIKE '%/dailies/%'
+                                   OR file LIKE 'daily/%' OR file LIKE 'dailies/%'))
          ORDER BY
            CASE WHEN title = ?1 THEN 0 ELSE 1 END,
            CASE WHEN file LIKE '%/daily/%' OR file LIKE '%/dailies/%'
@@ -743,6 +751,8 @@ pub fn find_daily_note(conn: &Connection, date: &str) -> rusqlite::Result<Option
                 COALESCE(title, ?1), NULL, NULL
          FROM files
          WHERE file LIKE ?2 AND excluded = 0
+           AND (file LIKE '%/daily/%' OR file LIKE '%/dailies/%'
+                OR file LIKE 'daily/%' OR file LIKE 'dailies/%')
          ORDER BY
            CASE WHEN file LIKE '%/daily/%' OR file LIKE '%/dailies/%'
                      OR file LIKE 'daily/%' OR file LIKE 'dailies/%' THEN 0 ELSE 1 END,
@@ -1068,6 +1078,31 @@ Today's notes about [[id:alpha-id][Alpha]].
         let daily = find_daily_note(&conn, "2024-01-15").unwrap();
         assert!(daily.is_some());
         assert_eq!(daily.unwrap().id, "daily-2024-01-15");
+    }
+
+    #[test]
+    fn find_daily_note_ignores_notes_that_merely_mention_the_date() {
+        // Quick capture appends to the result, so a near miss writes into an
+        // unrelated note.
+        let conn = Connection::open_in_memory().unwrap();
+        crate::schema::init_schema(&conn).unwrap();
+        crate::schema::init_fts(&conn).unwrap();
+        index::index_file(&conn, "/v/retro.org", ":PROPERTIES:\n:ID: retro\n:END:\n#+TITLE: Retro 2026-10-20\n").unwrap();
+        index::index_file(&conn, "/v/meeting-2026-10-20.org", "#+TITLE: Meeting\n").unwrap();
+        index::index_file(&conn, "/v/plan.org", "* 2026-10-20\n:PROPERTIES:\n:ID: heading\n:END:\n").unwrap();
+        assert!(find_daily_note(&conn, "2026-10-20").unwrap().is_none());
+
+        index::index_file(&conn, "/v/daily/2026-10-20.org", ":PROPERTIES:\n:ID: today\n:END:\n#+TITLE: 2026-10-20 Tuesday\n").unwrap();
+        assert_eq!(find_daily_note(&conn, "2026-10-20").unwrap().unwrap().id, "today");
+    }
+
+    #[test]
+    fn line_at_survives_an_offset_inside_a_multibyte_character() {
+        // A stored link offset outlives edits made outside the app.
+        let content = "héllo wörld\nnext";
+        assert_eq!(line_at(content, 2), None);
+        assert_eq!(line_at(content, 1).unwrap().0, 1);
+        assert_eq!(line_at(content, content.len() + 5), None);
     }
 
     #[test]

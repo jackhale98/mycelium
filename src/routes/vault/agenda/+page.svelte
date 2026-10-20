@@ -373,7 +373,7 @@
 				<div class="flex gap-2">
 					<div class="relative flex-1">
 						<svg class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-						<input type="text" bind:value={taskSearch} placeholder="Filter tasks..." aria-label="Filter tasks by title" class="text-fluid-sm w-full rounded-lg border border-surface-200 bg-surface-50 pl-8 pr-3 dark:border-surface-700 dark:bg-surface-900" style="min-height:var(--tap)" />
+						<input type="text" bind:value={taskSearch} placeholder="Filter tasks..." enterkeyhint="search" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Filter tasks by title" class="text-fluid-sm w-full rounded-lg border border-surface-200 bg-surface-50 pl-8 pr-3 dark:border-surface-700 dark:bg-surface-900" style="min-height:var(--tap)" />
 					</div>
 					<select bind:value={taskFilter} aria-label="Filter by state" class="text-fluid-xs rounded-lg border border-surface-200 bg-surface-50 px-2 dark:border-surface-700 dark:bg-surface-900" style="min-height:var(--tap)">
 						<option value="all">All</option>

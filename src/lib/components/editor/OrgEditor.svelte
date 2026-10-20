@@ -3,28 +3,57 @@
 	import { editor } from '$lib/stores/editor.svelte';
 	import { vault } from '$lib/stores/vault.svelte';
 	import { navigation } from '$lib/stores/navigation.svelte';
+	import { prefs } from '$lib/stores/prefs.svelte';
+	import { continueOrgList } from '$lib/codemirror/extensions/list-continue';
+	import { VIEWPORT_EVENT } from '$lib/native/keyboardViewport';
 
 	let container: HTMLDivElement;
 	let fallbackMode = $state(false);
 	let view: any;
-	let currentFilePath: string | null = null;
+	let cmViewModule: any;
+	/** The `editor.revision` the view's document was last loaded from. */
+	let loadedRevision = -1;
+
+	// Phones get the whole width for text: line numbers and the gutter marks
+	// cost a tenth of an iPhone's screen, and a size at which iOS is comfortable.
+	const touch = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+	const fontSize = touch ? '16px' : '14px';
+
+	/** What the keyboard may do while editing. CodeMirror turns all of it off by default. */
+	function inputAttributes(assist: boolean): Record<string, string> {
+		return assist
+			? { autocorrect: 'on', autocapitalize: 'sentences', spellcheck: 'true', writingsuggestions: 'true' }
+			: { autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false', writingsuggestions: 'false' };
+	}
 
 	onMount(() => {
 		initEditor();
-		return () => { view?.destroy(); };
+		// When the app is resized for the keyboard, keep the cursor in sight —
+		// the line being typed is the one the keyboard just covered.
+		const onViewport = () => {
+			if (!view?.hasFocus || !cmViewModule) return;
+			view.dispatch({
+				effects: cmViewModule.EditorView.scrollIntoView(view.state.selection.main.head, { y: 'nearest', yMargin: 24 }),
+			});
+		};
+		window.addEventListener(VIEWPORT_EVENT, onViewport);
+		return () => {
+			window.removeEventListener(VIEWPORT_EVENT, onViewport);
+			view?.destroy();
+		};
 	});
 
 	async function initEditor() {
 		try {
 			const cmView = await import('@codemirror/view');
+			cmViewModule = cmView;
 			const cmState = await import('@codemirror/state');
 			const cmCommands = await import('@codemirror/commands');
 			const cmLanguage = await import('@codemirror/language');
 			const cmSearch = await import('@codemirror/search');
 
 			let extensions: any[] = [
-				cmView.lineNumbers(),
-				cmView.highlightActiveLineGutter(),
+				...(touch ? [] : [cmView.lineNumbers(), cmView.highlightActiveLineGutter()]),
 				cmCommands.history(),
 				cmView.drawSelection(),
 				cmView.highlightActiveLine(),
@@ -64,6 +93,9 @@
 			} catch (e) { console.warn('Link autocomplete unavailable:', e); }
 
 			extensions.push(
+				cmView.EditorView.contentAttributes.of(inputAttributes(prefs.writingAssist)),
+				// Ahead of the default Enter, so a list item starts the next item.
+				cmView.keymap.of([{ key: 'Enter', run: continueOrgList }]),
 				cmView.keymap.of([
 					...cmCommands.defaultKeymap,
 					...cmCommands.historyKeymap,
@@ -84,8 +116,9 @@
 				cmView.EditorView.theme(
 				document.documentElement.classList.contains('dark')
 					? {
-						'&': { fontSize: '14px', fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace', backgroundColor: '#0f172a', color: '#e2e8f0' },
+						'&': { fontSize, fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace', backgroundColor: '#0f172a', color: '#e2e8f0' },
 						'.cm-content': { padding: '12px 0', minHeight: '400px', caretColor: '#4ade80' },
+						'.cm-scroller': { lineHeight: touch ? '1.55' : '1.4' },
 						'.cm-line': { padding: '1px 12px' },
 						'.cm-gutters': { backgroundColor: '#1e293b', borderRight: '1px solid #334155', color: '#64748b' },
 						'.cm-activeLineGutter': { backgroundColor: '#1e293b', color: '#94a3b8' },
@@ -97,8 +130,9 @@
 						'.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: '#052e16', color: '#4ade80' },
 					}
 					: {
-						'&': { fontSize: '14px', fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace', backgroundColor: '#ffffff', color: '#1e293b' },
+						'&': { fontSize, fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace', backgroundColor: '#ffffff', color: '#1e293b' },
 						'.cm-content': { padding: '12px 0', minHeight: '400px', caretColor: '#16a34a' },
+						'.cm-scroller': { lineHeight: touch ? '1.55' : '1.4' },
 						'.cm-line': { padding: '1px 12px' },
 						'.cm-gutters': { backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', color: '#94a3b8' },
 						'.cm-activeLineGutter': { backgroundColor: '#f1f5f9', color: '#64748b' },
@@ -122,7 +156,7 @@
 				state: startState,
 				parent: container,
 			});
-			currentFilePath = editor.filePath;
+			loadedRevision = editor.revision;
 
 		} catch (e) {
 			console.error('CodeMirror failed to initialize, using fallback textarea:', e);
@@ -130,14 +164,21 @@
 		}
 	}
 
-	// Reload content when a different file is opened
+	// Show whatever the store loads from disk: another file, or this one again
+	// after "Load their version" or a rename. Keyed on the store's revision, not
+	// the path, because a reload keeps the path — and a view left showing the old
+	// text would autosave it straight back over what was just loaded.
 	$effect(() => {
-		if (view && editor.filePath !== currentFilePath) {
-			view.dispatch({
-				changes: { from: 0, to: view.state.doc.length, insert: editor.content },
-			});
-			currentFilePath = editor.filePath;
-		}
+		const revision = editor.revision;
+		if (!view || revision === loadedRevision) return;
+		loadedRevision = revision;
+		const content = editor.content;
+		if (view.state.doc.toString() === content) return;
+		const cursor = Math.min(view.state.selection.main.head, content.length);
+		view.dispatch({
+			changes: { from: 0, to: view.state.doc.length, insert: content },
+			selection: { anchor: cursor },
+		});
 	});
 
 	export function insertAtCursor(text: string) {
@@ -242,7 +283,7 @@
 		oninput={handleFallbackInput}
 		class="min-h-[400px] w-full rounded-lg border p-4 font-mono text-sm leading-relaxed focus:outline-none"
 		style={document.documentElement.classList.contains('dark') ? 'background:#0f172a;color:#e2e8f0;border-color:#334155' : 'background:#ffffff;color:#1e293b;border-color:#e2e8f0'}
-		spellcheck="false"
+		{...inputAttributes(prefs.writingAssist)}
 	></textarea>
 {:else}
 	<div

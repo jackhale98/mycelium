@@ -182,6 +182,10 @@
 					type="text"
 					bind:value={search}
 					placeholder="Filter nodes..."
+					enterkeyhint="search"
+					autocorrect="off"
+					autocapitalize="off"
+					spellcheck="false"
 					class="w-full rounded-lg border border-surface-200 bg-surface-50 py-2 pl-9 pr-3 text-sm focus:border-mycelium-500 focus:outline-none focus:ring-2 focus:ring-mycelium-500/20 dark:border-surface-700 dark:bg-surface-900"
 				/>
 			</div>

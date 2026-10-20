@@ -37,6 +37,8 @@ pub struct AppState {
     vault_fs: Mutex<Arc<dyn db::VaultFs>>,
     own_writes: Mutex<HashMap<String, (String, Instant)>>,
     watcher: Mutex<Option<WatcherHandle>>,
+    /// Held across every read-modify-write of a vault file.
+    writes: Mutex<()>,
 }
 
 /// Lock a mutex, recovering from poisoning instead of failing every later command.
@@ -52,6 +54,7 @@ impl AppState {
             vault_fs: Mutex::new(Arc::new(db::NativeFs)),
             own_writes: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),
+            writes: Mutex::new(()),
         }
     }
 
@@ -110,6 +113,20 @@ impl AppState {
             }
             _ => false,
         }
+    }
+
+    /// Serialise a read-modify-write of vault files.
+    ///
+    /// Commands run concurrently, so without this two quick captures read the
+    /// same daily note and the second write drops the first capture; a save's
+    /// conflict check can pass and then lose to a capture landing before its
+    /// write. It cannot stop another program writing in between — nothing short
+    /// of cooperative locking could — but it closes every race inside the app
+    /// and shrinks the outside one to the gap between a read and a rename.
+    ///
+    /// Not reentrant: take it in the command, never in a helper it calls.
+    pub fn lock_writes(&self) -> MutexGuard<'_, ()> {
+        lock(&self.writes)
     }
 
     pub fn clear_own_writes(&self) {

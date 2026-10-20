@@ -5,9 +5,11 @@
 	let text = $state('');
 	let saving = $state(false);
 	let saved = $state(false);
+	// There is no Cmd+Enter on a phone keyboard; the button is the way to save.
+	const touch = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
 	async function handleSubmit() {
-		if (!text.trim()) return;
+		if (!text.trim() || saving) return;
 		saving = true;
 		try {
 			await quickCapture(text.trim(), localDate(), localTime());
@@ -59,12 +61,14 @@
 				bind:value={text}
 				onkeydown={handleKeydown}
 				placeholder="Jot down a thought..."
+				autocapitalize="sentences"
+				spellcheck="true"
 				rows="3"
 				class="w-full resize-none rounded-lg border border-surface-200 bg-surface-50 p-3 text-sm focus:border-mycelium-500 focus:outline-none focus:ring-2 focus:ring-mycelium-500/20 dark:border-surface-700 dark:bg-surface-950"
 				autofocus
 			></textarea>
 			<div class="mt-2 flex items-center justify-between">
-				<span class="text-[10px] text-surface-700 dark:text-surface-300">Cmd+Enter to save</span>
+				<span class="text-[10px] text-surface-700 dark:text-surface-300">{touch ? '' : 'Cmd+Enter to save'}</span>
 				<button
 					onclick={handleSubmit}
 					disabled={saving || !text.trim()}

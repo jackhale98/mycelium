@@ -28,6 +28,9 @@ class VaultStorage(private val context: Context) {
 
     data class OrgFile(val path: String, val lastModified: Long)
 
+    /** A walk's result: what was found, and the directories it could not read. */
+    data class OrgListing(val files: List<OrgFile>, val unreadable: List<String>)
+
     private val resolver: ContentResolver get() = context.contentResolver
 
     private var treeUri: Uri? = null
@@ -112,26 +115,49 @@ class VaultStorage(private val context: Context) {
      * Populates the path caches as a side effect, so the writes and reads that
      * follow an index pass resolve without touching the provider again.
      */
-    fun listOrgFiles(): List<OrgFile> {
-        val root = rootDocumentId() ?: return emptyList()
+    /**
+     * The vault's `.org` files, and the directories that could not be read.
+     *
+     * Losing access to the whole tree throws rather than answering with an
+     * empty listing: the indexer would read that as every note having been
+     * deleted. A directory that cannot be read is reported for the same
+     * reason, so nothing under it is taken as gone.
+     */
+    fun listOrgFiles(): OrgListing {
+        val root = rootDocumentId()
+            ?: throw IllegalStateException("The vault folder is no longer accessible. Pick it again.")
         documentIds.clear()
         directoryIds.clear()
         directoryIds[""] = root
 
         val found = mutableListOf<OrgFile>()
-        walk(root, "", found, depth = 0)
-        return found
+        val unreadable = mutableListOf<String>()
+        if (!walk(root, "", found, unreadable, depth = 0)) {
+            throw IllegalStateException("The vault folder could not be read.")
+        }
+        return OrgListing(found, unreadable)
     }
 
-    private fun walk(parentId: String, parentPath: String, out: MutableList<OrgFile>, depth: Int) {
-        // A pathological tree should not take the app down with it.
-        if (depth > MAX_DEPTH) return
-        val tree = treeUri ?: return
+    /** Returns false when [parentPath] itself could not be listed. */
+    private fun walk(
+        parentId: String,
+        parentPath: String,
+        out: MutableList<OrgFile>,
+        unreadable: MutableList<String>,
+        depth: Int,
+    ): Boolean {
+        // A pathological tree should not take the app down with it, but what
+        // lies below the cut-off is unseen, not absent.
+        if (depth > MAX_DEPTH) {
+            unreadable.add(parentPath)
+            return true
+        }
+        val tree = treeUri ?: return false
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
 
         val cursor: Cursor = runCatching {
             resolver.query(children, CHILD_COLUMNS, null, null, null)
-        }.getOrNull() ?: return
+        }.getOrNull() ?: return false
 
         cursor.use {
             while (it.moveToNext()) {
@@ -146,13 +172,14 @@ class VaultStorage(private val context: Context) {
                     // a .git holds far more files than the notes beside it.
                     if (IGNORED_DIRS.contains(name)) continue
                     directoryIds[path] = id
-                    walk(id, path, out, depth + 1)
+                    if (!walk(id, path, out, unreadable, depth + 1)) unreadable.add(path)
                 } else if (name.endsWith(ORG_SUFFIX)) {
                     documentIds[path] = id
                     out.add(OrgFile(path, modified))
                 }
             }
         }
+        return true
     }
 
     // ── Files ─────────────────────────────────────────────────────────────
