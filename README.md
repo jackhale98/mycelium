@@ -23,6 +23,7 @@ Mycelium lets you view, edit, search, and navigate your org-roam notes on deskto
 
 ### Editing
 - **Source editor** — CodeMirror 6 with org-mode syntax highlighting, folding, and Cmd+Click link navigation
+- **Lists continue on Enter** — the next bullet, number or unchecked box; Enter on an empty item ends the list
 - **Native keyboard toolbar** (iOS + Android) — formatting bar above the keyboard with buttons for headings, TODO, priority, tags, bold/italic/underline/strikethrough, code, lists, tables, timestamps, and more
 - **TODO management** — native picker with user-configured keywords, cycles through states. Completing a task stamps `CLOSED:`; completing a repeating task (`+1w`, `++1w`, `.+1w`) shifts its dates to the next occurrence and leaves it open, as org does
 - **Per-file `#+TODO:` keywords** — a file declaring its own workflow is parsed and indexed with those keywords
@@ -50,7 +51,7 @@ Mycelium lets you view, edit, search, and navigate your org-roam notes on deskto
 
 ### Mobile (iOS + Android)
 - **Native folder picker** (iOS) — `UIDocumentPickerViewController` with security-scoped bookmarks for persistent access across app launches, including subdirectory traversal
-- **Native keyboard toolbar** — `inputAccessoryView` on iOS (same approach as iA Writer/Bear/Blink), `WindowInsetsCompat`-positioned toolbar on Android. All pickers (TODO, heading, priority, tags, dates, tables) use native platform UI.
+- **Native keyboard toolbar** — shown only while the note editor has focus; every other field gets a plain keyboard. On iOS it is the web view's `inputAccessoryView`, supplied through the public `WKWebView` override WebKit has honoured since iOS 13; on Android a `WindowInsetsCompat`-positioned bar. All pickers (TODO, heading, priority, tags, dates, tables) use native platform UI.
 - **Dark mode** — no flash on tab switching or app launch (inline dark-mode script + CSS background on html/body)
 - **Client-side navigation** — SvelteKit `goto()` for instant tab switching, full reload for node-to-node navigation
 
