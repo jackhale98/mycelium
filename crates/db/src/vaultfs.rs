@@ -52,6 +52,62 @@ pub struct VaultEntry {
     pub mtime: String,
 }
 
+/// Somewhere a scan could not look.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanError {
+    /// The directory or file that could not be read, in the same form as
+    /// [`VaultEntry::path`]. `None` when the failure cannot be pinned to one
+    /// place, which makes the whole scan unverified.
+    pub path: Option<String>,
+    pub message: String,
+}
+
+/// The `.org` files a scan found, and the places it could not read.
+///
+/// A file missing from `entries` has only been shown to be gone if the scan
+/// could read where it would have been. A permission error, a provider that
+/// stopped answering or a directory removed mid-walk all make files vanish from
+/// a listing without vanishing from the vault, so whoever reconciles against a
+/// scan has to ask [`VaultScan::covers`] before treating absence as deletion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VaultScan {
+    pub entries: Vec<VaultEntry>,
+    pub errors: Vec<ScanError>,
+}
+
+impl VaultScan {
+    /// A scan that read everything it went looking for.
+    pub fn complete(entries: Vec<VaultEntry>) -> Self {
+        VaultScan { entries, errors: Vec::new() }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.errors.is_empty()
+    }
+
+    /// Whether the scan read the place `path` lives, so that its absence from
+    /// [`VaultScan::entries`] means it is no longer there.
+    pub fn covers(&self, path: &str) -> bool {
+        !self.errors.iter().any(|error| match &error.path {
+            None => true,
+            Some(unread) => is_within(path, unread),
+        })
+    }
+}
+
+/// `true` when `path` is `dir` itself or lies under it. Compared by whole
+/// components, so `notes-old/a.org` is not under `notes`.
+fn is_within(path: &str, dir: &str) -> bool {
+    let dir = dir.trim_end_matches(['/', '\\']);
+    if dir.is_empty() {
+        return true;
+    }
+    match path.strip_prefix(dir) {
+        Some(rest) => rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'),
+        None => false,
+    }
+}
+
 /// One entry of a directory listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultDirEntry {
@@ -63,7 +119,11 @@ pub struct VaultDirEntry {
 pub trait VaultFs: Send + Sync {
     /// Every `.org` file in the vault, skipping the directories in
     /// [`crate::sync::IGNORED_DIRS`].
-    fn list_org_files(&self, root: &str) -> Result<Vec<VaultEntry>, VaultFsError>;
+    ///
+    /// Places inside the vault that could not be read are reported in the
+    /// scan rather than skipped silently. Failing to read the vault at all is
+    /// an error: an empty listing would read as every note having been deleted.
+    fn list_org_files(&self, root: &str) -> Result<VaultScan, VaultFsError>;
 
     fn read_to_string(&self, path: &str) -> Result<String, VaultFsError>;
 
@@ -95,10 +155,21 @@ pub trait VaultFs: Send + Sync {
 pub struct NativeFs;
 
 impl VaultFs for NativeFs {
-    fn list_org_files(&self, root: &str) -> Result<Vec<VaultEntry>, VaultFsError> {
-        let mut out = Vec::new();
-        for entry in walkdir::WalkDir::new(root)
-            .follow_links(true)
+    /// Symbolic links are not followed. A link to somewhere inside the vault
+    /// would list the same note twice under two names, and one to somewhere
+    /// outside it would index notes the editor then refuses to open, since
+    /// every read and write is confined to the vault's real path. Walking from
+    /// the canonical root also keys each file by its real path, which is what
+    /// the editor resolves paths to, so a save and a scan agree on what a file
+    /// is called.
+    fn list_org_files(&self, root: &str) -> Result<VaultScan, VaultFsError> {
+        let root = Path::new(root)
+            .canonicalize()
+            .map_err(|e| VaultFsError::from_io(root, e))?;
+
+        let mut scan = VaultScan::default();
+        for entry in walkdir::WalkDir::new(&root)
+            .follow_links(false)
             .into_iter()
             .filter_entry(|e| {
                 e.depth() == 0
@@ -108,9 +179,17 @@ impl VaultFs for NativeFs {
         {
             let entry = match entry {
                 Ok(entry) => entry,
-                // A single unreadable directory must not abandon the scan.
                 Err(err) => {
-                    eprintln!("walkdir: {err}");
+                    // Without the root there is no listing to speak of.
+                    if err.depth() == 0 {
+                        return Err(VaultFsError::Io(format!("Cannot read the vault: {err}")));
+                    }
+                    // A single unreadable directory must not abandon the scan,
+                    // but nothing under it may be taken as deleted either.
+                    scan.errors.push(ScanError {
+                        path: err.path().map(|p| p.to_string_lossy().to_string()),
+                        message: err.to_string(),
+                    });
                     continue;
                 }
             };
@@ -126,12 +205,12 @@ impl VaultFs for NativeFs {
                 .and_then(|m| m.modified().ok())
                 .map(mtime_stamp)
                 .unwrap_or_default();
-            out.push(VaultEntry {
+            scan.entries.push(VaultEntry {
                 path: entry.path().to_string_lossy().to_string(),
                 mtime,
             });
         }
-        Ok(out)
+        Ok(scan)
     }
 
     fn read_to_string(&self, path: &str) -> Result<String, VaultFsError> {
@@ -205,6 +284,7 @@ mod tests {
         let mut found: Vec<String> = NativeFs
             .list_org_files(dir.path().to_str().unwrap())
             .unwrap()
+            .entries
             .into_iter()
             .map(|e| e.path.rsplit('/').next().unwrap().to_string())
             .collect();
@@ -215,7 +295,7 @@ mod tests {
     #[test]
     fn every_listed_entry_carries_an_mtime() {
         let dir = vault();
-        for entry in NativeFs.list_org_files(dir.path().to_str().unwrap()).unwrap() {
+        for entry in NativeFs.list_org_files(dir.path().to_str().unwrap()).unwrap().entries {
             assert!(!entry.mtime.is_empty(), "{} has no mtime", entry.path);
         }
     }
@@ -310,5 +390,99 @@ mod tests {
         let png = [0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         NativeFs.write_bytes(&path, &png).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), png);
+    }
+
+    #[test]
+    fn a_missing_vault_is_an_error_not_an_empty_listing() {
+        // An empty listing reads as "every note was deleted".
+        let dir = vault();
+        let gone = dir.path().join("not-here").to_string_lossy().to_string();
+        assert!(NativeFs.list_org_files(&gone).is_err());
+    }
+
+    #[test]
+    fn scans_key_files_by_their_real_path() {
+        // The editor resolves every path it writes to its real path; the scan
+        // has to agree or one file is indexed under two names.
+        let dir = vault();
+        let alias = dir.path().with_extension("alias");
+        std::os::unix::fs::symlink(dir.path(), &alias).unwrap();
+        let real = dir.path().canonicalize().unwrap();
+
+        let scan = NativeFs.list_org_files(alias.to_str().unwrap()).unwrap();
+        assert!(scan.is_complete());
+        assert!(!scan.entries.is_empty());
+        for entry in &scan.entries {
+            assert!(Path::new(&entry.path).starts_with(&real), "{} is not real", entry.path);
+        }
+        std::fs::remove_file(&alias).unwrap();
+    }
+
+    #[test]
+    fn symlinks_are_not_followed_inside_or_outside_the_vault() {
+        let dir = vault();
+        let outside = TempDir::new().unwrap();
+        std::fs::write(outside.path().join("private.org"), "* elsewhere").unwrap();
+        let root = dir.path();
+        std::os::unix::fs::symlink(outside.path(), root.join("linked-out")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("private.org"), root.join("file-out.org")).unwrap();
+        std::os::unix::fs::symlink(root.join("daily"), root.join("linked-in")).unwrap();
+        std::os::unix::fs::symlink(root.join("inbox.org"), root.join("file-in.org")).unwrap();
+        // A loop, which a following walk would have to detect.
+        std::os::unix::fs::symlink(root, root.join("daily/loop")).unwrap();
+
+        let scan = NativeFs.list_org_files(root.to_str().unwrap()).unwrap();
+        let mut found: Vec<String> = scan
+            .entries
+            .iter()
+            .map(|e| e.path.rsplit('/').next().unwrap().to_string())
+            .collect();
+        found.sort();
+        assert_eq!(found, vec!["2026-08-21.org", "inbox.org"]);
+        assert!(scan.is_complete());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_directory_is_reported_and_leaves_the_rest_covered() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = vault();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("secret.org"), "* hidden").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root ignores permission bits, so the test means nothing there.
+        if std::fs::read_dir(&locked).is_ok() {
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let scan = NativeFs.list_org_files(dir.path().to_str().unwrap()).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(!scan.is_complete());
+        let real = locked.canonicalize().unwrap();
+        assert!(!scan.covers(&real.join("secret.org").to_string_lossy()));
+        let inbox = dir.path().canonicalize().unwrap().join("inbox.org");
+        assert!(scan.covers(&inbox.to_string_lossy()));
+    }
+
+    #[test]
+    fn coverage_is_judged_by_whole_path_components() {
+        let scan = VaultScan {
+            entries: Vec::new(),
+            errors: vec![ScanError { path: Some("/v/notes".into()), message: String::new() }],
+        };
+        assert!(!scan.covers("/v/notes/a.org"));
+        assert!(!scan.covers("/v/notes"));
+        assert!(scan.covers("/v/notes-old/a.org"));
+        assert!(scan.covers("/v/inbox.org"));
+
+        let unplaced = VaultScan {
+            entries: Vec::new(),
+            errors: vec![ScanError { path: None, message: String::new() }],
+        };
+        assert!(!unplaced.covers("/v/inbox.org"));
+        assert!(VaultScan::complete(Vec::new()).covers("/v/inbox.org"));
     }
 }

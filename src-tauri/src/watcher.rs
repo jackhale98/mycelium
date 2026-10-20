@@ -113,7 +113,7 @@ fn run_watcher(app: AppHandle, stop: Arc<AtomicBool>, vault_path: &str) -> Resul
                 match event.kind {
                     EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
                         for path in &event.paths {
-                            if path.extension().map(|e| e == "org").unwrap_or(false) {
+                            if is_indexable_note(root, path) {
                                 pending_files
                                     .insert(path.to_string_lossy().to_string());
                                 last_event = Instant::now();
@@ -156,6 +156,31 @@ fn run_watcher(app: AppHandle, stop: Arc<AtomicBool>, vault_path: &str) -> Resul
     Ok(())
 }
 
+/// Whether a changed path is a note the vault scan would index.
+///
+/// The scan skips ignored directories at every depth and does not follow
+/// symlinks; the watcher sees events from all of them, and indexing one here
+/// would register, say, a Syncthing version copy's IDs against a file the user
+/// cannot see — or a note under a second name.
+fn is_indexable_note(root: &Path, path: &Path) -> bool {
+    if path.extension().map(|e| e != "org").unwrap_or(true) {
+        return false;
+    }
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let in_ignored_dir = relative
+        .parent()
+        .map(|dir| {
+            dir.components()
+                .any(|c| db::is_ignored_dir(&c.as_os_str().to_string_lossy()))
+        })
+        .unwrap_or(false);
+    if in_ignored_dir {
+        return false;
+    }
+    // A deleted note has no metadata and must still get through.
+    !matches!(std::fs::symlink_metadata(path), Ok(meta) if meta.file_type().is_symlink())
+}
+
 /// Re-index externally changed files. Files the app itself just wrote are skipped
 /// so an in-app save is not indexed twice. Returns true if anything changed.
 fn reindex_files(state: &AppState, files: &[String]) -> bool {
@@ -177,12 +202,62 @@ fn reindex_files(state: &AppState, files: &[String]) -> bool {
             changed |= indexed.is_ok();
         } else {
             let deleted = state.with_db(|conn| {
-                conn.execute("DELETE FROM files WHERE file = ?1", [file_path])
-                    .map_err(|e| e.to_string())
+                let removed = conn
+                    .execute("DELETE FROM files WHERE file = ?1", [file_path])
+                    .map_err(|e| e.to_string())?;
+                // The full-text table has no foreign key to cascade from, and a
+                // ghost row there keeps a deleted note in search results.
+                let _ = conn.execute("DELETE FROM files_fts WHERE file = ?1", [file_path]);
+                Ok(removed)
             });
             changed |= matches!(deleted, Ok(n) if n > 0);
         }
     }
 
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indexes_notes_the_scan_would_index() {
+        let root = Path::new("/vault");
+        assert!(is_indexable_note(root, Path::new("/vault/inbox.org")));
+        assert!(is_indexable_note(root, Path::new("/vault/daily/2026-10-20.org")));
+        // Deleted: no metadata, still let through so its rows are removed.
+        assert!(is_indexable_note(root, Path::new("/vault/gone/never-existed.org")));
+    }
+
+    #[test]
+    fn skips_ignored_directories_at_any_depth_and_non_notes() {
+        let root = Path::new("/vault");
+        assert!(!is_indexable_note(root, Path::new("/vault/.git/objects/x.org")));
+        assert!(!is_indexable_note(root, Path::new("/vault/notes/.stversions/inbox.org")));
+        assert!(!is_indexable_note(root, Path::new("/vault/.inbox.org.part")));
+        assert!(!is_indexable_note(root, Path::new("/vault/notes.txt")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_symlinked_notes() {
+        let dir = tempfile_dir();
+        let real = dir.join("real.org");
+        std::fs::write(&real, "* note").unwrap();
+        let link = dir.join("link.org");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(is_indexable_note(&dir, &real));
+        assert!(!is_indexable_note(&dir, &link));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn tempfile_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "mycelium-watcher-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 }

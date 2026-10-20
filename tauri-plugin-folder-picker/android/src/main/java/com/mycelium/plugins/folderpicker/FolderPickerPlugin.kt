@@ -107,15 +107,21 @@ class FolderPickerPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun listOrgFiles(invoke: Invoke) {
         io(invoke) {
+            val listing = storage.listOrgFiles()
             val files = JSArray()
-            for (file in storage.listOrgFiles()) {
+            for (file in listing.files) {
                 files.put(JSObject().apply {
                     put("path", file.path)
                     // Compared for equality only, never parsed.
                     put("mtime", file.lastModified.toString())
                 })
             }
-            JSObject().apply { put("files", files) }
+            val unreadable = JSArray()
+            for (dir in listing.unreadable) unreadable.put(dir)
+            JSObject().apply {
+                put("files", files)
+                put("unreadable", unreadable)
+            }
         }
     }
 

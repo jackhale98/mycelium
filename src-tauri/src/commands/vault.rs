@@ -13,8 +13,13 @@ pub async fn open_vault(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<sync::SyncResult, String> {
-    let vault_path = PathBuf::from(&path);
     validate_vault_location(&path)?;
+    // Everything below — the scan, the watcher, every path the editor resolves —
+    // works from the vault's real path, so they all name a file the same way.
+    // A vault reached through a symlink (or iOS's /var, which is one) would
+    // otherwise index each note under two names.
+    let path = canonical_vault_location(&path)?;
+    let vault_path = PathBuf::from(&path);
 
     // Resolve anything an interrupted write left behind before indexing, so a
     // recovered note is picked up by the scan that follows and no temporary
@@ -110,7 +115,10 @@ pub async fn check_vault_changes(
     let vault_path = state.vault_path()?;
     let path_str = vault_path.to_string_lossy().to_string();
 
-    state.with_db(|conn| sync::has_changes(conn, &path_str).map_err(|e| e.to_string()))
+    let vault_fs = state.vault_fs();
+    state.with_db(|conn| {
+        sync::has_changes_with(conn, &path_str, vault_fs.as_ref()).map_err(|e| e.to_string())
+    })
 }
 
 /// Configure the parser's recognized TODO/DONE keywords.
@@ -172,6 +180,20 @@ fn validate_vault_location(path: &str) -> Result<(), String> {
         return Err(format!("Not a directory: {path}"));
     }
     Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+fn canonical_vault_location(path: &str) -> Result<String, String> {
+    PathBuf::from(path)
+        .canonicalize()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("Cannot open the vault folder: {e}"))
+}
+
+/// An Android vault is a document tree URI, which has no other spelling.
+#[cfg(target_os = "android")]
+fn canonical_vault_location(path: &str) -> Result<String, String> {
+    Ok(path.to_string())
 }
 
 #[cfg(target_os = "android")]

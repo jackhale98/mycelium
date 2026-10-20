@@ -194,6 +194,12 @@ What the app does to your working tree:
 - **`.git` is never scanned or watched.** Version-control and sync metadata
   (`.git`, `.hg`, `.svn`, `.jj`, `.stversions`, `.stfolder`, `node_modules`) are
   skipped when indexing and excluded from the file watcher.
+- **Symbolic links are not followed.** Notes are indexed under their real path
+  inside the vault; a link to a folder elsewhere is skipped rather than indexed
+  as notes the editor could not open.
+- **A scan that cannot read part of the vault never drops it from the index.**
+  If a folder is unreadable (a revoked permission, a provider that stopped
+  answering), its notes keep their index entries until a scan can see them.
 - **Outside edits are picked up when the app returns to the foreground.** Pull in
   your git client, switch back, and the vault re-indexes.
 - **Concurrent edits are detected, not overwritten.** If a file changed on disk

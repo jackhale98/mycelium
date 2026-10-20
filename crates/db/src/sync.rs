@@ -2,7 +2,6 @@ use crate::{index, schema};
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use walkdir::{DirEntry, WalkDir};
 
 /// Directory names never descended into when scanning a vault.
 ///
@@ -30,15 +29,6 @@ pub const IGNORED_DIRS: &[&str] = &[
 /// `true` when a directory of this name should not be descended into.
 pub fn is_ignored_dir(name: &str) -> bool {
     IGNORED_DIRS.contains(&name)
-}
-
-/// `true` unless the entry is a directory on the ignore list. The root is
-/// always kept, so a vault that *is* `.git` still scans (the user's choice).
-fn keep_entry(entry: &DirEntry) -> bool {
-    if entry.depth() == 0 || !entry.file_type().is_dir() {
-        return true;
-    }
-    !is_ignored_dir(&entry.file_name().to_string_lossy())
 }
 
 /// Sync a vault directory with the database.
@@ -70,15 +60,17 @@ pub fn sync_vault_with(
 
     let mut result = SyncResult::default();
 
-    let org_files: Vec<(String, String)> = match fs.list_org_files(vault_path) {
-        Ok(entries) => entries.into_iter().map(|e| (e.path, e.mtime)).collect(),
-        Err(err) => {
-            let msg = format!("listing {vault_path}: {err}");
-            eprintln!("{msg}");
-            result.walk_errors.push(msg);
-            Vec::new()
-        }
-    };
+    // Not being able to list the vault at all is an error, never an empty
+    // listing: reconciling against nothing would drop every note from the index.
+    let scan = fs
+        .list_org_files(vault_path)
+        .map_err(|e| SyncError::Io(format!("Could not list the vault: {e}")))?;
+    for error in &scan.errors {
+        eprintln!("vault scan: {}", error.message);
+        result.walk_errors.push(error.message.clone());
+    }
+    let org_files: Vec<(String, String)> =
+        scan.entries.iter().map(|e| (e.path.clone(), e.mtime.clone())).collect();
 
     let current_files: HashSet<String> = org_files.iter().map(|(p, _)| p.clone()).collect();
 
@@ -91,15 +83,23 @@ pub fn sync_vault_with(
         .filter_map(|r| r.ok())
         .collect();
 
-    // Remove files from DB that no longer exist on disk
+    // Remove files from DB that no longer exist on disk. Only where the scan
+    // could see: a file under a directory it failed to read is unaccounted
+    // for, not gone, and keeps its rows until a scan that can read there says
+    // otherwise.
     for db_file in db_files.keys() {
-        if !current_files.contains(db_file) {
-            conn.execute("DELETE FROM files WHERE file = ?1", [db_file])
-                .map_err(|e| SyncError::Database(e.to_string()))?;
-            // Also clean FTS
-            let _ = conn.execute("DELETE FROM files_fts WHERE file = ?1", [db_file]);
-            result.removed += 1;
+        if current_files.contains(db_file) {
+            continue;
         }
+        if !scan.covers(db_file) {
+            result.unverified += 1;
+            continue;
+        }
+        conn.execute("DELETE FROM files WHERE file = ?1", [db_file])
+            .map_err(|e| SyncError::Database(e.to_string()))?;
+        // Also clean FTS
+        let _ = conn.execute("DELETE FROM files_fts WHERE file = ?1", [db_file]);
+        result.removed += 1;
     }
 
     // Index new or changed files (compare mtime, then hash if needed)
@@ -110,8 +110,17 @@ pub fn sync_vault_with(
         };
 
         if needs_update {
-            let content = fs.read_to_string(file_path)
-                .map_err(|e| SyncError::Io(format!("{}: {}", file_path, e)))?;
+            // One unreadable note — a cloud placeholder not yet downloaded, a
+            // file being replaced — must not stop every note after it from
+            // being indexed. It keeps whatever the index already had for it.
+            let content = match fs.read_to_string(file_path) {
+                Ok(content) => content,
+                Err(e) => {
+                    eprintln!("vault scan: could not read a note: {e}");
+                    result.walk_errors.push(e.to_string());
+                    continue;
+                }
+            };
 
             // Double-check with hash to avoid unnecessary re-index
             // (mtime can change without content change, e.g. git checkout)
@@ -121,6 +130,12 @@ pub fn sync_vault_with(
             if hash_changed {
                 let report = index::index_file_with_report(conn, file_path, &content)
                     .map_err(|e| SyncError::Database(e.to_string()))?;
+                // The indexer stats the file itself, which only works for a real
+                // path; record the stamp this listing will be compared against.
+                conn.execute(
+                    "UPDATE files SET mtime = ?1 WHERE file = ?2",
+                    rusqlite::params![disk_mtime, file_path],
+                ).map_err(|e| SyncError::Database(e.to_string()))?;
                 result.id_collisions.extend(report.id_collisions);
                 result.indexed += 1;
             } else {
@@ -182,6 +197,16 @@ pub fn file_mtime_stamp(file_path: &str) -> Option<String> {
 /// Quick check: are there files on disk whose mtime doesn't match the DB?
 /// Returns true if any changes detected. This is very fast (stat only, no reads).
 pub fn has_changes(conn: &Connection, vault_path: &str) -> Result<bool, SyncError> {
+    has_changes_with(conn, vault_path, &crate::vaultfs::NativeFs)
+}
+
+/// [`has_changes`] through any [`VaultFs`](crate::vaultfs::VaultFs), so it lists
+/// the same files, under the same names, that [`sync_vault_with`] would.
+pub fn has_changes_with(
+    conn: &Connection,
+    vault_path: &str,
+    fs: &dyn crate::vaultfs::VaultFs,
+) -> Result<bool, SyncError> {
     let db_files: HashMap<String, String> = conn
         .prepare("SELECT file, mtime FROM files")
         .map_err(|e| SyncError::Database(e.to_string()))?
@@ -190,35 +215,24 @@ pub fn has_changes(conn: &Connection, vault_path: &str) -> Result<bool, SyncErro
         .filter_map(|r| r.ok())
         .collect();
 
-    for entry in WalkDir::new(vault_path)
-        .into_iter()
-        .filter_entry(keep_entry)
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() { continue; }
-        if entry.path().extension().map(|e| e != "org").unwrap_or(true) { continue; }
+    let scan = fs
+        .list_org_files(vault_path)
+        .map_err(|e| SyncError::Io(format!("Could not list the vault: {e}")))?;
 
-        let path = entry.path().to_string_lossy().to_string();
-        let disk_mtime = entry.metadata().ok()
-            .and_then(|m| m.modified().ok())
-            .map(mtime_stamp)
-            .unwrap_or_default();
-
-        match db_files.get(&path) {
-            None => return Ok(true),       // New file
-            Some(db_mtime) if *db_mtime != disk_mtime => return Ok(true), // Changed
+    let mut seen = HashSet::new();
+    for entry in &scan.entries {
+        match db_files.get(&entry.path) {
+            None => return Ok(true), // New file
+            Some(db_mtime) if *db_mtime != entry.mtime => return Ok(true), // Changed
             _ => {}
         }
+        seen.insert(entry.path.as_str());
     }
 
-    // Check for deleted files
-    for db_file in db_files.keys() {
-        if !Path::new(db_file).exists() {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
+    // Deleted files — only where the scan could look, as in sync
+    Ok(db_files
+        .keys()
+        .any(|file| !seen.contains(file.as_str()) && scan.covers(file)))
 }
 
 /// Get the relative path for display purposes
@@ -238,6 +252,10 @@ pub struct SyncResult {
     /// Any non-fatal errors encountered during directory walking (e.g. permission denied)
     #[serde(default)]
     pub walk_errors: Vec<String>,
+    /// Indexed files the scan did not find but could not prove deleted, since
+    /// it failed to read where they live. Their rows are kept.
+    #[serde(default)]
+    pub unverified: usize,
     /// Number of broken links found (source node no longer exists)
     #[serde(default)]
     pub broken_links: usize,
@@ -283,16 +301,12 @@ mod tests {
         // register duplicate org-roam IDs against files the user cannot see.
         std::fs::write(root.join(".stversions/inbox.org"), "* stale copy").unwrap();
 
-        let mut found: Vec<String> = WalkDir::new(root)
-            .follow_links(true)
+        let mut found: Vec<String> = crate::vaultfs::NativeFs
+            .list_org_files(root.to_str().unwrap())
+            .unwrap()
+            .entries
             .into_iter()
-            .filter_entry(keep_entry)
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_type().is_file()
-                    && e.path().extension().map(|x| x == "org").unwrap_or(false)
-            })
-            .map(|e| e.file_name().to_string_lossy().to_string())
+            .map(|e| e.path.rsplit('/').next().unwrap().to_string())
             .collect();
         found.sort();
 
@@ -309,8 +323,148 @@ mod tests {
         }
     }
     use super::*;
+    use crate::vaultfs::{ScanError, VaultDirEntry, VaultEntry, VaultFs, VaultFsError, VaultScan};
     use std::fs;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    /// A vault whose listing and reads are scripted, to stage the failures a
+    /// real filesystem only produces under a revoked grant or a flaky provider.
+    struct ScriptedFs {
+        listing: Mutex<Result<VaultScan, String>>,
+        files: HashMap<String, String>,
+    }
+
+    impl ScriptedFs {
+        fn new(files: &[(&str, &str)]) -> Self {
+            let files: HashMap<String, String> =
+                files.iter().map(|(p, c)| (p.to_string(), c.to_string())).collect();
+            let entries = files
+                .keys()
+                .map(|p| VaultEntry { path: p.clone(), mtime: "1".into() })
+                .collect();
+            ScriptedFs { listing: Mutex::new(Ok(VaultScan::complete(entries))), files }
+        }
+
+        fn set_listing(&self, listing: Result<VaultScan, String>) {
+            *self.listing.lock().unwrap() = listing;
+        }
+    }
+
+    impl VaultFs for ScriptedFs {
+        fn list_org_files(&self, _root: &str) -> Result<VaultScan, VaultFsError> {
+            self.listing.lock().unwrap().clone().map_err(VaultFsError::Io)
+        }
+        fn read_to_string(&self, path: &str) -> Result<String, VaultFsError> {
+            self.files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| VaultFsError::Io(format!("{path}: unreadable")))
+        }
+        fn write(&self, _: &str, _: &str) -> Result<(), VaultFsError> { unimplemented!() }
+        fn write_bytes(&self, _: &str, _: &[u8]) -> Result<(), VaultFsError> { unimplemented!() }
+        fn modified(&self, _: &str) -> Result<String, VaultFsError> { unimplemented!() }
+        fn exists(&self, path: &str) -> bool { self.files.contains_key(path) }
+        fn remove_file(&self, _: &str) -> Result<(), VaultFsError> { unimplemented!() }
+        fn create_dir_all(&self, _: &str) -> Result<(), VaultFsError> { unimplemented!() }
+        fn read_dir(&self, _: &str) -> Result<Vec<VaultDirEntry>, VaultFsError> { unimplemented!() }
+    }
+
+    fn titled(id: &str) -> String {
+        format!(":PROPERTIES:\n:ID: {id}\n:END:\n#+TITLE: {id}\n")
+    }
+
+    fn indexed_files(conn: &Connection) -> Vec<String> {
+        let mut files: Vec<String> = conn
+            .prepare("SELECT file FROM files")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn a_failed_listing_aborts_the_sync_and_keeps_the_index() {
+        let a = titled("a");
+        let fs = ScriptedFs::new(&[("notes/a.org", &a)]);
+        let conn = Connection::open_in_memory().unwrap();
+        sync_vault_with(&conn, "/vault", &fs).unwrap();
+
+        // A revoked folder grant: the listing fails outright.
+        fs.set_listing(Err("permission denied".into()));
+        assert!(sync_vault_with(&conn, "/vault", &fs).is_err());
+        assert!(has_changes_with(&conn, "/vault", &fs).is_err());
+        assert_eq!(indexed_files(&conn), vec!["notes/a.org"]);
+    }
+
+    #[test]
+    fn a_partial_scan_never_deletes_what_it_could_not_see() {
+        let (a, b) = (titled("a"), titled("b"));
+        let fs = ScriptedFs::new(&[("notes/a.org", &a), ("work/b.org", &b)]);
+        let conn = Connection::open_in_memory().unwrap();
+        sync_vault_with(&conn, "/vault", &fs).unwrap();
+
+        // `work/` could not be read this time, and `notes/a.org` really is gone.
+        fs.set_listing(Ok(VaultScan {
+            entries: Vec::new(),
+            errors: vec![ScanError { path: Some("work".into()), message: "EACCES".into() }],
+        }));
+        let result = sync_vault_with(&conn, "/vault", &fs).unwrap();
+
+        assert_eq!(indexed_files(&conn), vec!["work/b.org"]);
+        assert_eq!(result.removed, 1);
+        assert_eq!(result.unverified, 1);
+        assert_eq!(result.walk_errors, vec!["EACCES".to_string()]);
+    }
+
+    #[test]
+    fn an_unplaced_scan_error_protects_every_file() {
+        let a = titled("a");
+        let fs = ScriptedFs::new(&[("a.org", &a)]);
+        let conn = Connection::open_in_memory().unwrap();
+        sync_vault_with(&conn, "/vault", &fs).unwrap();
+
+        fs.set_listing(Ok(VaultScan {
+            entries: Vec::new(),
+            errors: vec![ScanError { path: None, message: "provider went away".into() }],
+        }));
+        sync_vault_with(&conn, "/vault", &fs).unwrap();
+        assert_eq!(indexed_files(&conn), vec!["a.org"]);
+        assert!(!has_changes_with(&conn, "/vault", &fs).unwrap());
+    }
+
+    #[test]
+    fn one_unreadable_note_does_not_stop_the_rest_being_indexed() {
+        let b = titled("b");
+        let fs = ScriptedFs::new(&[("b.org", &b)]);
+        // Listed, but every read of it fails.
+        fs.set_listing(Ok(VaultScan::complete(vec![
+            VaultEntry { path: "a.org".into(), mtime: "1".into() },
+            VaultEntry { path: "b.org".into(), mtime: "1".into() },
+        ])));
+        let conn = Connection::open_in_memory().unwrap();
+        let result = sync_vault_with(&conn, "/vault", &fs).unwrap();
+
+        assert_eq!(indexed_files(&conn), vec!["b.org"]);
+        assert_eq!(result.walk_errors.len(), 1);
+    }
+
+    #[test]
+    fn has_changes_agrees_with_a_non_native_vault() {
+        // Android's vault is not a directory; this used to walk it with std::fs
+        // and report a change on every foreground.
+        let a = titled("a");
+        let fs = ScriptedFs::new(&[("a.org", &a)]);
+        let conn = Connection::open_in_memory().unwrap();
+        sync_vault_with(&conn, "/vault", &fs).unwrap();
+        assert!(!has_changes_with(&conn, "/vault", &fs).unwrap());
+
+        fs.set_listing(Ok(VaultScan::complete(Vec::new())));
+        assert!(has_changes_with(&conn, "/vault", &fs).unwrap());
+    }
 
     #[test]
     fn test_sync_vault() {
