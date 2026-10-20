@@ -4,6 +4,10 @@ import UIKit
 import WebKit
 import UniformTypeIdentifiers
 
+class EditorFocusArgs: Decodable {
+    let focused: Bool
+}
+
 class FolderPickerPlugin: Plugin {
     private var pendingInvoke: Invoke?
     /// Track the actively accessed security-scoped URL so we can stop/restart
@@ -81,6 +85,24 @@ class FolderPickerPlugin: Plugin {
 
             KeyboardToolbar.install(on: webView)
             invoke.resolve(["installed": true])
+        }
+    }
+
+    /// Show or hide the keyboard toolbar as focus enters or leaves the editor.
+    ///
+    /// The page normally reports focus through a script message, which reaches
+    /// the toolbar ahead of the keyboard; this command is the fallback for the
+    /// moment before that handler is registered.
+    @objc public func setEditorFocused(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(EditorFocusArgs.self)
+        DispatchQueue.main.async {
+            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = scene.windows.first,
+               let webView = Self.findWKWebView(in: window),
+               let toolbar = KeyboardToolbar.installed(on: webView) {
+                toolbar.setEditorFocused(args.focused)
+            }
+            invoke.resolve(["focused": args.focused])
         }
     }
 

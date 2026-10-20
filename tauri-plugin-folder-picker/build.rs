@@ -1,4 +1,4 @@
-const COMMANDS: &[&str] = &["pick_folder", "restore_access", "setup_toolbar"];
+const COMMANDS: &[&str] = &["pick_folder", "restore_access", "setup_toolbar", "set_editor_focused"];
 
 fn main() {
   tauri_plugin::Builder::new(COMMANDS)

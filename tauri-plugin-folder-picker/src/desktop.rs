@@ -27,4 +27,9 @@ impl<R: Runtime> FolderPicker<R> {
         // On desktop, no keyboard toolbar needed
         Ok(PickFolderResponse { path: None })
     }
+
+    pub fn set_editor_focused(&self, _focused: bool) -> crate::Result<()> {
+        // On desktop, no keyboard toolbar to show or hide
+        Ok(())
+    }
 }

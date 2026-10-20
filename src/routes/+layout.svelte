@@ -6,6 +6,7 @@
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 	import { resyncIfChanged } from '$lib/vault/resync';
 	import { installBackHandler } from '$lib/vault/back';
+	import { installEditorFocusReporting } from '$lib/native/editorFocus';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -22,8 +23,9 @@
 		(window as any).__myceliumOrgConfig = orgConfig;
 		loadVaultTags();
 
-		// Install native keyboard toolbar (iOS + Android)
-		setupNativeToolbar();
+		// Install native keyboard toolbar (iOS + Android), shown only while the
+		// note editor has focus
+		const removeFocusReporting = setupNativeToolbar();
 
 		// Answer the Android system back press. Harmless elsewhere: nothing calls
 		// the hook on platforms that have no system back.
@@ -43,6 +45,7 @@
 		window.addEventListener('focus', onForeground);
 
 		return () => {
+			removeFocusReporting();
 			removeBackHandler();
 			document.removeEventListener('visibilitychange', onForeground);
 			window.removeEventListener('focus', onForeground);
@@ -60,8 +63,16 @@
 		} catch { /* not fatal — tags just won't appear in picker */ }
 	}
 
-	async function setupNativeToolbar() {
-		if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) return;
+	function setupNativeToolbar(): () => void {
+		if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) return () => {};
+		// Listen before installing, so a field focused while the toolbar is
+		// being set up is still reported.
+		const remove = installEditorFocusReporting();
+		void installNativeToolbar();
+		return remove;
+	}
+
+	async function installNativeToolbar() {
 		try {
 			const { invoke } = await import('@tauri-apps/api/core');
 			await invoke('plugin:folder-picker|setup_toolbar');

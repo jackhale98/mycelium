@@ -10,6 +10,12 @@ pub struct PickFolderResponse {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorFocusRequest {
+    pub focused: bool,
+}
+
 // ── Vault file access (Android) ───────────────────────────────────────────
 //
 // Paths in these payloads are vault-relative, using `/` separators. The Kotlin

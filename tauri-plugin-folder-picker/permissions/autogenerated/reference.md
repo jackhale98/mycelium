@@ -7,6 +7,7 @@ Default permissions for the folder picker plugin
 - `allow-pick-folder`
 - `allow-restore-access`
 - `allow-setup-toolbar`
+- `allow-set-editor-focused`
 
 ## Permission Table
 
@@ -65,6 +66,32 @@ Enables the restore_access command without any pre-configured scope.
 <td>
 
 Denies the restore_access command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`folder-picker:allow-set-editor-focused`
+
+</td>
+<td>
+
+Enables the set_editor_focused command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`folder-picker:deny-set-editor-focused`
+
+</td>
+<td>
+
+Denies the set_editor_focused command without any pre-configured scope.
 
 </td>
 </tr>

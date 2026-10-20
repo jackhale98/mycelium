@@ -34,6 +34,17 @@ class KeyboardToolbar(private val activity: Activity) {
 
     private var toolbarView: View? = null
 
+    /**
+     * Whether focus is inside the note editor, as last reported by the page.
+     * The toolbar's buttons all act on the editor, so it is shown only then,
+     * never over the search field, a modal or quick capture.
+     */
+    private var editorFocused = false
+
+    /** The keyboard's state from the last insets pass, replayed on focus changes. */
+    private var imeShowing = false
+    private var imeOffset = 0
+
     /** Resolved per build, so following the device theme costs no extra state. */
     private val palette: ToolbarPalette
         get() {
@@ -73,18 +84,31 @@ class KeyboardToolbar(private val activity: Activity) {
             // bar, which would otherwise push the toolbar off-screen.
             val offset = (imeHeight - navBarHeight).coerceAtLeast(0)
 
-            if (imeVisible && imeHeight > 0) {
-                toolbar.visibility = View.VISIBLE
-                toolbar.translationY = -offset.toFloat()
-            } else {
-                toolbar.visibility = View.GONE
-                toolbar.translationY = 0f
-            }
+            imeShowing = imeVisible && imeHeight > 0
+            imeOffset = offset
+            applyVisibility()
             insets
         }
 
         // Position correctly if the keyboard is already up when the toolbar installs
         ViewCompat.requestApplyInsets(rootView)
+    }
+
+    /** Record whether the editor has focus. Call on the UI thread. */
+    fun setEditorFocused(focused: Boolean) {
+        editorFocused = focused
+        applyVisibility()
+    }
+
+    private fun applyVisibility() {
+        val toolbar = toolbarView ?: return
+        if (imeShowing && editorFocused) {
+            toolbar.visibility = View.VISIBLE
+            toolbar.translationY = -imeOffset.toFloat()
+        } else {
+            toolbar.visibility = View.GONE
+            toolbar.translationY = 0f
+        }
     }
 
     private fun createToolbarView(wv: WebView): View {

@@ -18,22 +18,58 @@ private func jsString(_ value: String) -> String {
         .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
 }
 
-/// Native iOS keyboard toolbar that sits above the software keyboard.
-/// Uses the inputAccessoryView mechanism — same approach as iA Writer, Bear, Blink.
+/// Key the toolbar is attached to its web view under.
+private var toolbarAssociationKey: UInt8 = 0
+
+/// Name of the script message the web app posts when focus enters or leaves
+/// the note editor.
+let editorFocusMessageName = "myceliumEditorFocus"
+
+/// Native iOS keyboard toolbar that sits above the software keyboard while the
+/// note editor has focus.
 ///
-/// Installation: call `KeyboardToolbar.install(on:)` with the WKWebView instance.
-/// Each button tap calls evaluateJavaScript to trigger the web app's handlers.
+/// The toolbar is the web view's `inputAccessoryView`. Since iOS 13 (WebKit
+/// r246229) the view that actually becomes first responder inside a
+/// `WKWebView` asks the web view for its input accessory, so overriding that
+/// public `UIResponder` property on the web view is the supported way to supply
+/// one. Tauri creates the web view itself, so the override is added to its
+/// class at runtime instead of by declaring a subclass; no private WebKit class
+/// is named or touched.
+///
+/// The toolbar is offered only while the editor is focused. Every button acts
+/// on the editor, so showing it over the search field, a modal or quick capture
+/// put commands on screen that edited a note the user was not looking at. Every
+/// other field gets no accessory at all, which also drops WebKit's
+/// previous/next/done bar — the look of a native text field.
 class KeyboardToolbar: UIView {
     private weak var webView: WKWebView?
 
-    /// Create and install the toolbar on a WKWebView.
-    /// This replaces the default inputAccessoryView by swizzling WKContentView.
+    /// Whether focus is inside the note editor, as last reported by the page.
+    private(set) var editorFocused = false
+
+    /// Create and install the toolbar on a WKWebView. Installing twice is a no-op.
     static func install(on webView: WKWebView) {
+        if objc_getAssociatedObject(webView, &toolbarAssociationKey) is KeyboardToolbar {
+            return
+        }
         let toolbar = KeyboardToolbar(webView: webView)
-        // Store toolbar reference on the webView to keep it alive
-        objc_setAssociatedObject(webView, "myceliumToolbar", toolbar, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        // Install via WKContentView swizzle
-        swizzleInputAccessoryView(toolbar: toolbar, in: webView)
+        // The web view owns the toolbar; the toolbar only holds it weakly.
+        objc_setAssociatedObject(webView, &toolbarAssociationKey, toolbar, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        overrideInputAccessoryView(of: webView)
+
+        // A script message, not a plugin command, carries focus changes: it
+        // travels on the same channel as WebKit's own "element focused"
+        // notification and arrives ahead of it, so the keyboard comes up with
+        // the right accessory instead of growing one a moment later.
+        let controller = webView.configuration.userContentController
+        controller.removeScriptMessageHandler(forName: editorFocusMessageName)
+        controller.add(EditorFocusHandler(toolbar: toolbar), name: editorFocusMessageName)
+        NSLog("[Mycelium] Keyboard toolbar installed")
+    }
+
+    /// The toolbar installed on `webView`, if any.
+    static func installed(on webView: WKWebView) -> KeyboardToolbar? {
+        objc_getAssociatedObject(webView, &toolbarAssociationKey) as? KeyboardToolbar
     }
 
     private init(webView: WKWebView) {
@@ -46,6 +82,19 @@ class KeyboardToolbar: UIView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Record whether the editor has focus, and swap the accessory if a
+    /// keyboard is already showing.
+    func setEditorFocused(_ focused: Bool) {
+        guard focused != editorFocused else { return }
+        editorFocused = focused
+        // UIKit only re-reads inputAccessoryView when the first responder asks
+        // it to. Focus moving between fields inside the page keeps the same
+        // first responder, so it has to be told.
+        if let webView = webView, let responder = Self.firstResponder(in: webView) {
+            responder.reloadInputViews()
+        }
+    }
+
     // MARK: - UI Setup
 
     private func setupUI() {
@@ -56,9 +105,25 @@ class KeyboardToolbar: UIView {
         border.autoresizingMask = .flexibleWidth
         addSubview(border)
 
+        // Dismiss button, pinned to the trailing edge so it is always reachable
+        // however far the buttons are scrolled.
+        let dismissWidth: CGFloat = 44
+        let dismiss = UIButton(type: .system)
+        dismiss.frame = CGRect(x: bounds.width - dismissWidth, y: 0.5, width: dismissWidth, height: 43.5)
+        dismiss.autoresizingMask = [.flexibleLeftMargin, .flexibleHeight]
+        dismiss.setImage(UIImage(systemName: "keyboard.chevron.compact.down"), for: .normal)
+        dismiss.accessibilityLabel = "Hide keyboard"
+        dismiss.addTarget(self, action: #selector(dismissTapped), for: .touchUpInside)
+        addSubview(dismiss)
+
+        let dismissSeparator = UIView(frame: CGRect(x: bounds.width - dismissWidth, y: 8, width: 0.5, height: 28))
+        dismissSeparator.backgroundColor = .separator
+        dismissSeparator.autoresizingMask = [.flexibleLeftMargin]
+        addSubview(dismissSeparator)
+
         // Scroll view for horizontal scrolling
         let scroll = UIScrollView()
-        scroll.frame = CGRect(x: 0, y: 0.5, width: bounds.width, height: 43.5)
+        scroll.frame = CGRect(x: 0, y: 0.5, width: bounds.width - dismissWidth, height: 43.5)
         scroll.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         scroll.showsHorizontalScrollIndicator = false
         scroll.showsVerticalScrollIndicator = false
@@ -108,6 +173,7 @@ class KeyboardToolbar: UIView {
             btn.frame = CGRect(x: x, y: yOffset, width: width, height: btnHeight)
             btn.setTitle(label, for: .normal)
             btn.accessibilityIdentifier = action
+            btn.accessibilityLabel = Self.accessibilityLabels[action] ?? label
 
             if let color = color {
                 btn.setTitleColor(color, for: .normal)
@@ -125,7 +191,37 @@ class KeyboardToolbar: UIView {
         scroll.contentSize = CGSize(width: x + 8, height: 43.5)
     }
 
+    /// Spoken names for the buttons, whose titles are mostly abbreviations.
+    private static let accessibilityLabels: [String: String] = [
+        "link": "Insert link",
+        "heading": "Heading",
+        "makeNode": "Make heading a node",
+        "todo": "TODO state",
+        "priority": "Priority",
+        "tag": "File tags",
+        "deadline": "Deadline",
+        "scheduled": "Scheduled",
+        "bold": "Bold",
+        "italic": "Italic",
+        "underline": "Underline",
+        "strike": "Strikethrough",
+        "code": "Code",
+        "verbatim": "Verbatim",
+        "list": "List item",
+        "checkbox": "Checkbox",
+        "table": "Table",
+        "srcblock": "Source block",
+        "quote": "Quote",
+        "timestamp": "Insert date",
+    ]
+
     // MARK: - Button Tap Handler
+
+    @objc private func dismissTapped() {
+        // Blurring the editor is what tells WebKit the keyboard can go; ending
+        // editing natively would leave the page believing it still has focus.
+        webView?.evaluateJavaScript("document.activeElement && document.activeElement.blur()", completionHandler: nil)
+    }
 
     @objc private func buttonTapped(_ sender: UIButton) {
         guard let action = sender.accessibilityIdentifier, !action.isEmpty else { return }
@@ -375,61 +471,73 @@ class KeyboardToolbar: UIView {
         topVC.present(vc, animated: true)
     }
 
-    // MARK: - WKContentView Swizzle
+    // MARK: - Accessory override
 
-    /// Install the toolbar by swizzling the inputAccessoryView on WKContentView.
-    /// This is the standard technique used by a-shell, Blink, and other WKWebView apps.
-    private static func swizzleInputAccessoryView(toolbar: KeyboardToolbar, in webView: WKWebView) {
-        guard let contentView = findContentView(in: webView) else {
-            NSLog("[Mycelium] Could not find WKContentView for toolbar installation")
+    /// Classes whose `inputAccessoryView` getter has already been replaced.
+    private static var overriddenClasses = Set<ObjectIdentifier>()
+
+    /// Make `webView`'s class answer `inputAccessoryView` with its toolbar.
+    ///
+    /// A web view with a toolbar gets the toolbar while the editor is focused
+    /// and no accessory otherwise. Any other instance of the class — there are
+    /// none today — keeps whatever it answered before.
+    private static func overrideInputAccessoryView(of webView: WKWebView) {
+        guard var cls: AnyClass = object_getClass(webView) else { return }
+        // Key-value observation swaps in a hidden subclass of its own; the
+        // override belongs on the class it was made from.
+        while NSStringFromClass(cls).hasPrefix("NSKVONotifying_"), let parent = class_getSuperclass(cls) {
+            cls = parent
+        }
+        guard !overriddenClasses.contains(ObjectIdentifier(cls)) else { return }
+
+        let selector = #selector(getter: UIResponder.inputAccessoryView)
+        guard let current = class_getInstanceMethod(cls, selector) else {
+            NSLog("[Mycelium] Web view has no inputAccessoryView; toolbar not installed")
             return
         }
 
-        // Store toolbar on the content view
-        objc_setAssociatedObject(contentView, "myceliumToolbarView", toolbar, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-
-        let contentViewClass: AnyClass = type(of: contentView)
-
-        // Create a dynamic subclass to override inputAccessoryView
-        let subclassName = "MyceliumContentView"
-        if let existingClass = NSClassFromString(subclassName) {
-            // Already swizzled, just update the toolbar reference
-            object_setClass(contentView, existingClass)
-            return
+        typealias Getter = @convention(c) (AnyObject, Selector) -> UIView?
+        let previous = unsafeBitCast(method_getImplementation(current), to: Getter.self)
+        let getter: @convention(block) (AnyObject) -> UIView? = { receiver in
+            if let toolbar = objc_getAssociatedObject(receiver, &toolbarAssociationKey) as? KeyboardToolbar {
+                return toolbar.editorFocused ? toolbar : nil
+            }
+            return previous(receiver, selector)
         }
+        let implementation = imp_implementationWithBlock(getter)
 
-        guard let subclass = objc_allocateClassPair(contentViewClass, subclassName, 0) else {
-            NSLog("[Mycelium] Failed to create dynamic subclass for toolbar")
-            return
+        // Usually the class inherits the getter from WKWebView, so this adds an
+        // override to it alone. If it already declares one, replace that; the
+        // previous implementation is kept above for web views without a toolbar.
+        if !class_addMethod(cls, selector, implementation, method_getTypeEncoding(current)) {
+            method_setImplementation(current, implementation)
         }
-
-        // Override inputAccessoryView getter
-        let getterSel = NSSelectorFromString("inputAccessoryView")
-        let getterBlock: @convention(block) (AnyObject) -> UIView? = { obj in
-            return objc_getAssociatedObject(obj, "myceliumToolbarView") as? UIView
-        }
-        let getterImp = imp_implementationWithBlock(getterBlock as Any)
-        let typeEncoding = "@@:" // returns object, takes self + _cmd
-        class_addMethod(subclass, getterSel, getterImp, typeEncoding)
-
-        objc_registerClassPair(subclass)
-        object_setClass(contentView, subclass)
-
-        NSLog("[Mycelium] Keyboard toolbar installed successfully")
+        overriddenClasses.insert(ObjectIdentifier(cls))
     }
 
-    /// Walk the view hierarchy to find the WKContentView.
-    private static func findContentView(in view: UIView) -> UIView? {
-        let className = NSStringFromClass(type(of: view))
-        if className == "WKContentView" {
-            return view
-        }
+    /// The view inside `view` that currently holds first responder, if any.
+    private static func firstResponder(in view: UIView) -> UIView? {
+        if view.isFirstResponder { return view }
         for subview in view.subviews {
-            if let found = findContentView(in: subview) {
-                return found
-            }
+            if let found = firstResponder(in: subview) { return found }
         }
         return nil
+    }
+}
+
+/// Receives the page's editor focus reports.
+///
+/// The user content controller retains its handlers, so this holds the toolbar
+/// weakly to keep the toolbar's lifetime tied to the web view alone.
+private class EditorFocusHandler: NSObject, WKScriptMessageHandler {
+    private weak var toolbar: KeyboardToolbar?
+
+    init(toolbar: KeyboardToolbar) {
+        self.toolbar = toolbar
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        toolbar?.setEditorFocused((message.body as? Bool) ?? false)
     }
 }
 

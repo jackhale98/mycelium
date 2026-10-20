@@ -94,6 +94,17 @@ impl<R: Runtime> FolderPicker<R> {
         handle.run_mobile_plugin(command, payload).map_err(Into::into)
     }
 
+    /// Show the keyboard toolbar only while the note editor has focus.
+    pub fn set_editor_focused(&self, focused: bool) -> crate::Result<()> {
+        match &self.0 {
+            Some(handle) => handle
+                .run_mobile_plugin::<EmptyResponse>("setEditorFocused", EditorFocusRequest { focused })
+                .map(|_| ())
+                .map_err(Into::into),
+            None => Ok(()),
+        }
+    }
+
     pub fn setup_toolbar(&self) -> crate::Result<PickFolderResponse> {
         match &self.0 {
             Some(handle) => handle

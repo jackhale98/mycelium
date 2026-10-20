@@ -24,3 +24,11 @@ pub(crate) async fn setup_toolbar<R: Runtime>(
 ) -> Result<PickFolderResponse> {
     app.folder_picker().setup_toolbar()
 }
+
+#[command]
+pub(crate) async fn set_editor_focused<R: Runtime>(
+    app: AppHandle<R>,
+    focused: bool,
+) -> Result<()> {
+    app.folder_picker().set_editor_focused(focused)
+}
