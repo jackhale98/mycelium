@@ -148,7 +148,8 @@ class FolderPickerPlugin: Plugin {
 
             // Activate security-scoped access for the entire directory (includes subdirectories)
             let accessing = beginSecurityScopedAccess(to: url)
-            NSLog("[Mycelium] Restored bookmark access for: %@ (accessing=%d, stale=%d)", url.path, accessing ? 1 : 0, isStale ? 1 : 0)
+            // Paths stay out of the system log: they name the user's folders.
+            NSLog("[Mycelium] Restored vault access (accessing=%d, stale=%d)", accessing ? 1 : 0, isStale ? 1 : 0)
 
             if isStale {
                 // Re-save the bookmark if stale
@@ -183,18 +184,9 @@ extension FolderPickerPlugin: UIDocumentPickerDelegate {
 
         // Releases any previously held URL before starting the new one
         let accessing = beginSecurityScopedAccess(to: url)
-        NSLog("[Mycelium] Picked folder: %@ (accessing=%d)", url.path, accessing ? 1 : 0)
-
-        // Enumerate subdirectories to verify access
-        if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-            var dirCount = 0
-            var fileCount = 0
-            while let item = enumerator.nextObject() as? URL {
-                let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                if isDir { dirCount += 1 } else { fileCount += 1 }
-            }
-            NSLog("[Mycelium] Vault contents: %d dirs, %d files", dirCount, fileCount)
-        }
+        // The vault is not walked here: this runs on the main thread, and the
+        // index scan that follows reports anything it cannot read.
+        NSLog("[Mycelium] Picked vault folder (accessing=%d)", accessing ? 1 : 0)
 
         do {
             let bookmarkData = try url.bookmarkData(
@@ -204,7 +196,7 @@ extension FolderPickerPlugin: UIDocumentPickerDelegate {
             )
             UserDefaults.standard.set(bookmarkData, forKey: "mycelium_vault_bookmark")
             UserDefaults.standard.set(url.path, forKey: "mycelium_vault_path")
-            NSLog("[Mycelium] Saved bookmark for: %@", url.path)
+            NSLog("[Mycelium] Saved vault bookmark")
         } catch {
             NSLog("[Mycelium] Bookmark save failed: %@", error.localizedDescription)
         }

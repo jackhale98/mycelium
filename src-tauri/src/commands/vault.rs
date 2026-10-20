@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use crate::watcher;
 use db::sync;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -204,4 +204,36 @@ fn validate_vault_location(path: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::fsutil;
+
+    #[test]
+    fn a_vault_opened_through_a_symlink_indexes_each_note_once() {
+        // The scan and the editor used to name files differently when the vault
+        // path was not the real one, so every save added a second row.
+        let base = std::env::temp_dir().join(format!("mycelium-vault-{}", uuid::Uuid::new_v4().simple()));
+        let real = base.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("note.org"), ":PROPERTIES:\n:ID: n\n:END:\n#+TITLE: Note\n* TODO task\n").unwrap();
+        let alias = base.join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+
+        let root = canonical_vault_location(alias.to_str().unwrap()).unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        sync::sync_vault(&conn, &root).unwrap();
+
+        // What a save does: resolve the path, then index under that key.
+        let key = fsutil::vault_key(Path::new(&root), "note.org").unwrap();
+        db::index::index_file(&conn, &key, ":PROPERTIES:\n:ID: n\n:END:\n#+TITLE: Note\n* TODO task\n").unwrap();
+        let result = sync::sync_vault(&conn, &root).unwrap();
+
+        let files: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0)).unwrap();
+        let nodes: i64 = conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap();
+        assert_eq!((files, nodes, result.removed), (1, 1, 0));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }
