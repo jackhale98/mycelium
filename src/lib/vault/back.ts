@@ -45,8 +45,12 @@ export function handleBackPress(): boolean {
 		case 'exit':
 			return false;
 		case 'navigate':
-			void editor.flush();
-			window.history.back();
+			// Leave only once the note is saved: going back unloads the page, and
+			// a save still in flight would be cut off with it. If the save did
+			// not land, stay; the editor is showing why.
+			void editor.flush().then((saved) => {
+				if (saved) window.history.back();
+			});
 			return true;
 	}
 }

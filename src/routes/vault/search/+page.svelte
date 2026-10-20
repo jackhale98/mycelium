@@ -10,12 +10,17 @@
 	let isSearching = $state(false);
 	let error = $state<string | null>(null);
 	let searchTimeout: ReturnType<typeof setTimeout>;
+	let inputEl: HTMLInputElement;
+	/** Bumped per search, so a slow answer to an older query cannot replace a newer one. */
+	let searchSeq = 0;
 
 	function handleInput() {
 		clearTimeout(searchTimeout);
 		if (!query.trim()) {
+			searchSeq += 1;
 			results = [];
 			error = null;
+			isSearching = false;
 			return;
 		}
 		searchTimeout = setTimeout(() => doSearch(), 200);
@@ -23,22 +28,29 @@
 
 	async function doSearch() {
 		if (!query.trim()) return;
+		const seq = ++searchSeq;
 		isSearching = true;
 		error = null;
 		try {
-			results = await searchFull(query.trim());
+			const found = await searchFull(query.trim());
+			if (seq !== searchSeq) return;
+			results = found;
 		} catch (e) {
+			if (seq !== searchSeq) return;
 			results = [];
 			error = String(e);
 		} finally {
-			isSearching = false;
+			if (seq === searchSeq) isSearching = false;
 		}
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') {
+		if (e.key === 'Enter' && !e.isComposing) {
 			clearTimeout(searchTimeout);
 			doSearch();
+			// The Search key means "show me": put the keyboard away so the
+			// results have the screen, as a native search field does.
+			inputEl?.blur();
 		}
 	}
 </script>
@@ -58,10 +70,16 @@
 			</svg>
 		</button>
 		<input
-			type="text"
+			type="search"
+			bind:this={inputEl}
 			bind:value={query}
 			oninput={handleInput}
 			onkeydown={handleKeydown}
+			enterkeyhint="search"
+			autocorrect="off"
+			autocapitalize="off"
+			spellcheck="false"
+			aria-label="Search notes"
 			placeholder="Search titles and content..."
 			class="flex-1 rounded-lg border border-surface-200 bg-surface-50 px-3 py-2 text-sm focus:border-mycelium-500 focus:outline-none focus:ring-2 focus:ring-mycelium-500/20 dark:border-surface-700 dark:bg-surface-900"
 		/>

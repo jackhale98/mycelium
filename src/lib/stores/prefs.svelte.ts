@@ -20,14 +20,28 @@ class PrefsStore {
 	 */
 	saveMode = $state<SaveMode>('auto');
 
+	/**
+	 * Let the keyboard help while writing: autocorrect, sentence capitals,
+	 * spell-check and predictive text.
+	 *
+	 * On by default, because prose is most of what goes into a note and a
+	 * keyboard that does none of this feels broken next to every other app.
+	 * It can be turned off for vaults heavy on markup, where the system's
+	 * smart punctuation turns a table's `--` into a dash.
+	 */
+	writingAssist = $state(true);
+
 	constructor() {
 		if (typeof localStorage === 'undefined') return;
 		try {
 			const saved = localStorage.getItem(KEY);
 			if (!saved) return;
-			const data = JSON.parse(saved) as Partial<{ saveMode: SaveMode }>;
+			const data = JSON.parse(saved) as Partial<{ saveMode: SaveMode; writingAssist: boolean }>;
 			if (data.saveMode === 'auto' || data.saveMode === 'manual') {
 				this.saveMode = data.saveMode;
+			}
+			if (typeof data.writingAssist === 'boolean') {
+				this.writingAssist = data.writingAssist;
 			}
 		} catch {
 			/* a corrupt preference is not worth failing over */
@@ -43,9 +57,21 @@ class PrefsStore {
 		this.persist();
 	}
 
+	setWritingAssist(on: boolean) {
+		this.writingAssist = on;
+		this.persist();
+	}
+
 	private persist() {
 		if (typeof localStorage === 'undefined') return;
-		localStorage.setItem(KEY, JSON.stringify({ saveMode: this.saveMode }));
+		try {
+			localStorage.setItem(
+				KEY,
+				JSON.stringify({ saveMode: this.saveMode, writingAssist: this.writingAssist })
+			);
+		} catch {
+			/* storage can be unavailable; the choice still holds for this session */
+		}
 	}
 }
 

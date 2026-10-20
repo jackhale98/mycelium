@@ -16,7 +16,7 @@
 	let error = $state<string | null>(null);
 
 	async function handleCreate() {
-		if (!title.trim()) return;
+		if (!title.trim() || isCreating) return;
 
 		isCreating = true;
 		error = null;
@@ -45,8 +45,10 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') {
-			handleCreate();
+		// Not while an IME is composing, and not twice: a second Enter while the
+		// first is still creating would make a second note.
+		if (e.key === 'Enter' && !e.isComposing) {
+			if (!isCreating) handleCreate();
 		} else if (e.key === 'Escape') {
 			onclose?.();
 		}
@@ -70,6 +72,8 @@
 			bind:value={title}
 			onkeydown={handleKeydown}
 			placeholder="Node title..."
+			enterkeyhint="done"
+			autocapitalize="sentences"
 			class="w-full rounded-lg border border-surface-200 bg-surface-50 px-4 py-3 text-sm focus:border-mycelium-500 focus:outline-none focus:ring-2 focus:ring-mycelium-500/20 dark:border-surface-700 dark:bg-surface-950"
 			autofocus
 		/>

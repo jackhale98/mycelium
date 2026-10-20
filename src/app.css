@@ -48,6 +48,13 @@ html, body {
 	-webkit-text-size-adjust: 100%;
 }
 
+/* While the note editor has focus the tab bar steps aside: on a phone the
+   keyboard already takes half the screen, and every line left belongs to the
+   note. It comes back the moment the editor loses focus. */
+html.editing .mobile-nav {
+	display: none;
+}
+
 /* Prevent white flash during dark-mode page transitions */
 html.dark, html.dark body {
 	background-color: var(--color-surface-950);

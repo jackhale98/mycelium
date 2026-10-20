@@ -317,6 +317,29 @@
 				</p>
 			</section>
 
+			<!-- Writing -->
+			<section class="rounded-xl border border-surface-200 p-4 dark:border-surface-700">
+				<h2 class="mb-3 text-sm font-semibold uppercase text-surface-700 dark:text-surface-300">
+					Writing
+				</h2>
+				<label class="flex items-start gap-3">
+					<input
+						type="checkbox"
+						checked={prefs.writingAssist}
+						onchange={(e) => prefs.setWritingAssist((e.currentTarget as HTMLInputElement).checked)}
+						class="mt-0.5 h-4 w-4 accent-mycelium-600"
+					/>
+					<span class="flex flex-col gap-1">
+						<span class="text-sm font-medium">Keyboard assistance</span>
+						<span class="text-[11px] leading-snug text-surface-700 dark:text-surface-300">
+							Autocorrect, capitals at the start of sentences, spell-check and
+							predictive text while editing. Turn off if smart punctuation gets in
+							the way of org markup, such as table rules.
+						</span>
+					</span>
+				</label>
+			</section>
+
 			<!-- Org Mode Configuration -->
 			<section class="rounded-xl border border-surface-200 p-4 dark:border-surface-700">
 				<h2 class="mb-3 text-sm font-semibold uppercase text-surface-700 dark:text-surface-300">
@@ -325,7 +348,7 @@
 				<div class="space-y-3">
 					<div>
 						<label for="todo-keywords" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Active Keywords</label>
-						<input id="todo-keywords" type="text" bind:value={todoInput} onblur={saveOrgConfig} aria-invalid={todoError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {todoError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="TODO, NEXT" />
+						<input id="todo-keywords" type="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" bind:value={todoInput} onblur={saveOrgConfig} aria-invalid={todoError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {todoError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="TODO, NEXT" />
 						{#if todoError}
 							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{todoError}</p>
 						{:else}
@@ -334,7 +357,7 @@
 					</div>
 					<div>
 						<label for="waiting-keywords" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Waiting Keywords</label>
-						<input id="waiting-keywords" type="text" bind:value={waitingInput} onblur={saveOrgConfig} aria-invalid={waitingError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {waitingError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="WAITING, HOLD" />
+						<input id="waiting-keywords" type="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" bind:value={waitingInput} onblur={saveOrgConfig} aria-invalid={waitingError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {waitingError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="WAITING, HOLD" />
 						{#if waitingError}
 							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{waitingError}</p>
 						{:else}
@@ -343,7 +366,7 @@
 					</div>
 					<div>
 						<label for="done-keywords" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Done Keywords</label>
-						<input id="done-keywords" type="text" bind:value={doneInput} onblur={saveOrgConfig} aria-invalid={doneError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {doneError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="DONE, CANCELLED" />
+						<input id="done-keywords" type="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" bind:value={doneInput} onblur={saveOrgConfig} aria-invalid={doneError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {doneError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="DONE, CANCELLED" />
 						{#if doneError}
 							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{doneError}</p>
 						{:else}
@@ -352,7 +375,7 @@
 					</div>
 					<div>
 						<label for="priorities" class="mb-1 block text-xs font-medium text-surface-700 dark:text-surface-300">Priorities</label>
-						<input id="priorities" type="text" bind:value={prioInput} onblur={saveOrgConfig} aria-invalid={prioError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {prioError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="A, B, C" />
+						<input id="priorities" type="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" bind:value={prioInput} onblur={saveOrgConfig} aria-invalid={prioError !== null} class="w-full rounded-lg border bg-surface-50 px-3 py-2 text-sm dark:bg-surface-950 {prioError ? 'border-red-400 dark:border-red-700' : 'border-surface-200 dark:border-surface-700'}" placeholder="A, B, C" />
 						{#if prioError}
 							<p class="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{prioError}</p>
 						{:else}

@@ -6,7 +6,8 @@
 	import { orgConfig } from '$lib/stores/orgconfig.svelte';
 	import { resyncIfChanged } from '$lib/vault/resync';
 	import { installBackHandler } from '$lib/vault/back';
-	import { installEditorFocusReporting } from '$lib/native/editorFocus';
+	import { installEditorFocusReporting, isEditorTarget } from '$lib/native/editorFocus';
+	import { installEditingClass, installKeyboardViewport } from '$lib/native/keyboardViewport';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -26,6 +27,8 @@
 		// Install native keyboard toolbar (iOS + Android), shown only while the
 		// note editor has focus
 		const removeFocusReporting = setupNativeToolbar();
+		const removeKeyboardViewport = installKeyboardViewport();
+		const removeEditingClass = installEditingClass(isEditorTarget);
 
 		// Answer the Android system back press. Harmless elsewhere: nothing calls
 		// the hook on platforms that have no system back.
@@ -46,6 +49,8 @@
 
 		return () => {
 			removeFocusReporting();
+			removeKeyboardViewport();
+			removeEditingClass();
 			removeBackHandler();
 			document.removeEventListener('visibilitychange', onForeground);
 			window.removeEventListener('focus', onForeground);
@@ -83,6 +88,6 @@
 	}
 </script>
 
-<div class="h-screen w-screen overflow-hidden bg-surface-0 text-surface-900 dark:bg-surface-950 dark:text-surface-100">
+<div style="height: var(--app-height, 100vh)" class="w-screen overflow-hidden bg-surface-0 text-surface-900 dark:bg-surface-950 dark:text-surface-100">
 	{@render children()}
 </div>

@@ -99,6 +99,9 @@
 						bind:value={filter}
 						onfocus={() => (dropdownOpen = true)}
 						placeholder={selectedTag ? 'Change tag...' : 'Search tags...'}
+						autocorrect="off"
+						autocapitalize="off"
+						spellcheck="false"
 						class="flex-1 bg-transparent text-sm focus:outline-none"
 					/>
 					<svg class="h-4 w-4 shrink-0 text-surface-700 dark:text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
